@@ -1,0 +1,16 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/g++-12",
+      "-c",
+      "--std=c++2b",
+      "-DSIMPLESUB_DEMO",
+      "-o",
+      "binsub",
+      "./binsub.cpp"
+    ],
+    "directory": "/sn640/binsub",
+    "file": "/sn640/binsub/binsub.cpp",
+    "output": "/sn640/binsub/binsub"
+  }
+]
