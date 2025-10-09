@@ -64,7 +64,48 @@ struct TypeNode {
   explicit TypeNode(TVariable v_) : v(std::move(v_)) {}
   explicit TypeNode(TFunction f) : v(std::move(f)) {}
   explicit TypeNode(TRecord r) : v(std::move(r)) {}
+  
+  TPrimitive* getAsTPrimitive() { return std::get_if<TPrimitive>(&v); }
+  const TPrimitive* getAsTPrimitive() const { return std::get_if<TPrimitive>(&v); }
+  
+  TVariable* getAsTVariable() { return std::get_if<TVariable>(&v); }
+  const TVariable* getAsTVariable() const { return std::get_if<TVariable>(&v); }
+  
+  TFunction* getAsTFunction() { return std::get_if<TFunction>(&v); }
+  const TFunction* getAsTFunction() const { return std::get_if<TFunction>(&v); }
+  
+  TRecord* getAsTRecord() { return std::get_if<TRecord>(&v); }
+  const TRecord* getAsTRecord() const { return std::get_if<TRecord>(&v); }
+  
+  TFunction& getAsTFunctionRef() { return std::get<TFunction>(v); }
+  const TFunction& getAsTFunctionRef() const { return std::get<TFunction>(v); }
+  
+  bool isTPrimitive() const { return std::holds_alternative<TPrimitive>(v); }
+  bool isTVariable() const { return std::holds_alternative<TVariable>(v); }
+  bool isTFunction() const { return std::holds_alternative<TFunction>(v); }
+  bool isTRecord() const { return std::holds_alternative<TRecord>(v); }
 };
+
+// Helper functions for type checking variant types directly
+template<typename T>
+constexpr bool isTPrimitiveType() {
+  return std::is_same_v<std::decay_t<T>, TPrimitive>;
+}
+
+template<typename T>
+constexpr bool isTVariableType() {
+  return std::is_same_v<std::decay_t<T>, TVariable>;
+}
+
+template<typename T>
+constexpr bool isTFunctionType() {
+  return std::is_same_v<std::decay_t<T>, TFunction>;
+}
+
+template<typename T>
+constexpr bool isTRecordType() {
+  return std::is_same_v<std::decay_t<T>, TRecord>;
+}
 
 inline SimpleType make_primitive(std::string name) {
   return std::make_shared<TypeNode>(TPrimitive{std::move(name)});
@@ -88,17 +129,17 @@ make_record(std::vector<std::pair<std::string, SimpleType>> fields) {
 
 // compute the max level contained in a type (lazy in paper; direct here)
 // :contentReference[oaicite:3]{index=3}
-inline int level_of(const SimpleType &st) {
+int level_of(const SimpleType &st) {
   return std::visit(
       [](auto const &n) -> int {
         using T = std::decay_t<decltype(n)>;
-        if constexpr (std::is_same_v<T, TPrimitive>)
+        if constexpr (isTPrimitiveType<T>())
           return 0;
-        if constexpr (std::is_same_v<T, TVariable>)
+        if constexpr (isTVariableType<T>())
           return n.state->level;
-        if constexpr (std::is_same_v<T, TFunction>)
+        if constexpr (isTFunctionType<T>())
           return std::max(level_of(n.lhs), level_of(n.rhs));
-        if constexpr (std::is_same_v<T, TRecord>) {
+        if constexpr (isTRecordType<T>()) {
           int m = 0;
           for (auto const &[_, t] : n.fields)
             m = std::max(m, level_of(t));
@@ -120,7 +161,6 @@ using Cache = std::set<std::pair<const TypeNode *, const TypeNode *>>;
 // ======================= Extrusion (level-fixing copy) =====================
 // Implements Fig. 7 in the paper. Copies a type to target level `lvl` while
 // respecting polarity and caching (vs,pol) to avoid cycles.
-// :contentReference[oaicite:4]{index=4}
 struct PolarVS {
   VariableState *vs;
   bool pos;
@@ -130,28 +170,28 @@ struct PolarVS {
     return pos < other.pos;
   }
 };
-inline SimpleType
+SimpleType
 extrude(const SimpleType &ty, bool pol, int lvl,
         std::map<PolarVS, std::shared_ptr<VariableState>> &cache,
         VarSupply &supply);
 
-inline SimpleType
+SimpleType
 extrude(const SimpleType &ty, bool pol, int lvl,
         std::map<PolarVS, std::shared_ptr<VariableState>> &cache,
         VarSupply &supply) {
   if (level_of(ty) <= lvl)
     return ty;
 
-  if (auto p = std::get_if<TPrimitive>(&ty->v))
+  if (auto p = ty->getAsTPrimitive())
     return ty;
 
-  if (auto f = std::get_if<TFunction>(&ty->v)) {
+  if (auto f = ty->getAsTFunction()) {
     auto l = extrude(f->lhs, !pol, lvl, cache, supply);
     auto r = extrude(f->rhs, pol, lvl, cache, supply);
     return make_function(std::move(l), std::move(r));
   }
 
-  if (auto r = std::get_if<TRecord>(&ty->v)) {
+  if (auto r = ty->getAsTRecord()) {
     std::vector<std::pair<std::string, SimpleType>> fs;
     fs.reserve(r->fields.size());
     for (auto const &[n, t] : r->fields) {
@@ -160,7 +200,7 @@ extrude(const SimpleType &ty, bool pol, int lvl,
     return make_record(std::move(fs));
   }
 
-  auto v = std::get_if<TVariable>(&ty->v);
+  auto v = ty->getAsTVariable();
   assert(v);
 
   PolarVS key{v->state.get(), pol};
@@ -212,8 +252,8 @@ inline std::expected<void, Error> constrain_impl(const SimpleType &lhs,
                                                  const SimpleType &rhs,
                                                  Cache &cache,
                                                  VarSupply &supply) {
-  if (auto lp = std::get_if<TPrimitive>(&lhs->v)) {
-    if (auto rp = std::get_if<TPrimitive>(&rhs->v)) {
+  if (auto lp = lhs->getAsTPrimitive()) {
+    if (auto rp = rhs->getAsTPrimitive()) {
       if (lp->name == rp->name)
         return {};
       else
@@ -222,8 +262,8 @@ inline std::expected<void, Error> constrain_impl(const SimpleType &lhs,
     }
   }
 
-  if (auto lf = std::get_if<TFunction>(&lhs->v))
-    if (auto rf = std::get_if<TFunction>(&rhs->v)) {
+  if (auto lf = lhs->getAsTFunction())
+    if (auto rf = rhs->getAsTFunction()) {
       if (auto e = constrain(rf->lhs, lf->lhs, cache, supply); !e)
         return e;
       if (auto e = constrain(lf->rhs, rf->rhs, cache, supply); !e)
@@ -231,8 +271,8 @@ inline std::expected<void, Error> constrain_impl(const SimpleType &lhs,
       return {};
     }
 
-  if (auto lr = std::get_if<TRecord>(&lhs->v))
-    if (auto rr = std::get_if<TRecord>(&rhs->v)) {
+  if (auto lr = lhs->getAsTRecord())
+    if (auto rr = rhs->getAsTRecord()) {
       std::map<std::string, SimpleType> fmap;
       for (auto const &[n, t] : lr->fields)
         fmap[n] = t;
@@ -246,7 +286,7 @@ inline std::expected<void, Error> constrain_impl(const SimpleType &lhs,
       return {};
     }
 
-  if (auto lv = std::get_if<TVariable>(&lhs->v)) {
+  if (auto lv = lhs->getAsTVariable()) {
     // guard: only allow rhs to flow into α if rhs.level <= α.level
     if (level_of(rhs) <= lv->state->level) {
       lv->state->upperBounds.push_back(rhs);
@@ -262,7 +302,7 @@ inline std::expected<void, Error> constrain_impl(const SimpleType &lhs,
     return constrain(lhs, rhs_ex, cache, supply);
   }
 
-  if (auto rv = std::get_if<TVariable>(&rhs->v)) {
+  if (auto rv = rhs->getAsTVariable()) {
     if (level_of(lhs) <= rv->state->level) {
       rv->state->lowerBounds.push_back(lhs);
       for (auto const &ub : rv->state->upperBounds)
@@ -304,13 +344,13 @@ inline SimpleType freshen_above_rec(const SimpleType &t, int cutoff,
   return std::visit(
       [&](auto const &n) -> SimpleType {
         using T = std::decay_t<decltype(n)>;
-        if constexpr (std::is_same_v<T, TPrimitive>)
+        if constexpr (isTPrimitiveType<T>())
           return t;
-        if constexpr (std::is_same_v<T, TFunction>)
+        if constexpr (isTFunctionType<T>())
           return make_function(
               freshen_above_rec(n.lhs, cutoff, at_level, memo, supply),
               freshen_above_rec(n.rhs, cutoff, at_level, memo, supply));
-        if constexpr (std::is_same_v<T, TRecord>) {
+        if constexpr (isTRecordType<T>()) {
           std::vector<std::pair<std::string, SimpleType>> fs;
           fs.reserve(n.fields.size());
           for (auto const &[name, sub] : n.fields)
@@ -377,10 +417,10 @@ inline int demo_levels() {
   // and similarly for bool on id2.
   Cache cache;
   // id1 is α1→α1
-  auto d1 = std::get<TFunction>(id1->v).lhs;
-  auto r1 = std::get<TFunction>(id1->v).rhs;
-  auto d2 = std::get<TFunction>(id2->v).lhs;
-  auto r2 = std::get<TFunction>(id2->v).rhs;
+  auto d1 = id1->getAsTFunctionRef().lhs;
+  auto r1 = id1->getAsTFunctionRef().rhs;
+  auto d2 = id2->getAsTFunctionRef().lhs;
+  auto r2 = id2->getAsTFunctionRef().rhs;
 
   if (auto e = constrain(TInt, d1, cache, supply); !e) {
     std::cerr << e.error().msg << "\n";
