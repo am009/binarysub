@@ -1,92 +1,46 @@
-// simplesub_core.hpp
-// C++23 header-only. Core Simple-sub + levels-based let polymorphism.
-// No exceptions, no RTTI. Errors via std::expected.
-
-#ifndef SIMPLESUB_CORE_HPP
-#define SIMPLESUB_CORE_HPP
-
-#include <algorithm>
-#include <cassert>
-#include <cstdint>
-#include <expected>
-#include <iostream>
-#include <map>
-#include <memory>
-#include <optional>
-#include <set>
-#include <string>
-#include <utility>
-#include <variant>
-#include <vector>
+#include "binsub.h"
 
 namespace simplesub {
 
-// ======================= Fresh supply & scope levels =======================
-struct VarSupply {
-  std::uint32_t next = 0;
-  std::uint32_t fresh_id() { return next++; }
-};
-struct Scope {
-  int level = 0;
-  void enter() { ++level; }
-  void leave() { --level; }
-};
+// ======================= Implementation =======================
 
-// ======================= SimpleType =============
+// VarSupply implementation
+std::uint32_t VarSupply::fresh_id() { return next++; }
 
-struct TypeNode;
-using SimpleType = std::shared_ptr<TypeNode>;
+// Scope implementation  
+void Scope::enter() { ++level; }
+void Scope::leave() { --level; }
 
-struct VariableState {
-  std::vector<SimpleType> lowerBounds; // things known ≤ α  (positive position)
-  std::vector<SimpleType> upperBounds; // things known ≥ α  (negative position)
-  std::uint32_t id;
-  int level; // creation/generalization level
-  VariableState(std::uint32_t i, int lvl) : id(i), level(lvl) {}
-};
+// VariableState implementation
+VariableState::VariableState(std::uint32_t i, int lvl) : id(i), level(lvl) {}
 
-struct TPrimitive {
-  std::string name;
-};
-struct TVariable {
-  std::shared_ptr<VariableState> state;
-};
-struct TFunction {
-  SimpleType lhs, rhs;
-};
-struct TRecord {
-  std::vector<std::pair<std::string, SimpleType>> fields;
-};
+// TypeNode implementation
+TypeNode::TypeNode(TPrimitive p) : v(std::move(p)) {}
+TypeNode::TypeNode(TVariable v_) : v(std::move(v_)) {}
+TypeNode::TypeNode(TFunction f) : v(std::move(f)) {}
+TypeNode::TypeNode(TRecord r) : v(std::move(r)) {}
 
-struct TypeNode {
-  std::variant<TPrimitive, TVariable, TFunction, TRecord> v;
-  explicit TypeNode(TPrimitive p) : v(std::move(p)) {}
-  explicit TypeNode(TVariable v_) : v(std::move(v_)) {}
-  explicit TypeNode(TFunction f) : v(std::move(f)) {}
-  explicit TypeNode(TRecord r) : v(std::move(r)) {}
-  
-  TPrimitive* getAsTPrimitive() { return std::get_if<TPrimitive>(&v); }
-  const TPrimitive* getAsTPrimitive() const { return std::get_if<TPrimitive>(&v); }
-  
-  TVariable* getAsTVariable() { return std::get_if<TVariable>(&v); }
-  const TVariable* getAsTVariable() const { return std::get_if<TVariable>(&v); }
-  
-  TFunction* getAsTFunction() { return std::get_if<TFunction>(&v); }
-  const TFunction* getAsTFunction() const { return std::get_if<TFunction>(&v); }
-  
-  TRecord* getAsTRecord() { return std::get_if<TRecord>(&v); }
-  const TRecord* getAsTRecord() const { return std::get_if<TRecord>(&v); }
-  
-  TFunction& getAsTFunctionRef() { return std::get<TFunction>(v); }
-  const TFunction& getAsTFunctionRef() const { return std::get<TFunction>(v); }
-  
-  bool isTPrimitive() const { return std::holds_alternative<TPrimitive>(v); }
-  bool isTVariable() const { return std::holds_alternative<TVariable>(v); }
-  bool isTFunction() const { return std::holds_alternative<TFunction>(v); }
-  bool isTRecord() const { return std::holds_alternative<TRecord>(v); }
-};
+TPrimitive* TypeNode::getAsTPrimitive() { return std::get_if<TPrimitive>(&v); }
+const TPrimitive* TypeNode::getAsTPrimitive() const { return std::get_if<TPrimitive>(&v); }
 
-// Helper functions for type checking variant types directly
+TVariable* TypeNode::getAsTVariable() { return std::get_if<TVariable>(&v); }
+const TVariable* TypeNode::getAsTVariable() const { return std::get_if<TVariable>(&v); }
+
+TFunction* TypeNode::getAsTFunction() { return std::get_if<TFunction>(&v); }
+const TFunction* TypeNode::getAsTFunction() const { return std::get_if<TFunction>(&v); }
+
+TRecord* TypeNode::getAsTRecord() { return std::get_if<TRecord>(&v); }
+const TRecord* TypeNode::getAsTRecord() const { return std::get_if<TRecord>(&v); }
+
+TFunction& TypeNode::getAsTFunctionRef() { return std::get<TFunction>(v); }
+const TFunction& TypeNode::getAsTFunctionRef() const { return std::get<TFunction>(v); }
+
+bool TypeNode::isTPrimitive() const { return std::holds_alternative<TPrimitive>(v); }
+bool TypeNode::isTVariable() const { return std::holds_alternative<TVariable>(v); }
+bool TypeNode::isTFunction() const { return std::holds_alternative<TFunction>(v); }
+bool TypeNode::isTRecord() const { return std::holds_alternative<TRecord>(v); }
+
+// Helper template function implementations
 template<typename T>
 constexpr bool isTPrimitiveType() {
   return std::is_same_v<std::decay_t<T>, TPrimitive>;
@@ -107,21 +61,25 @@ constexpr bool isTRecordType() {
   return std::is_same_v<std::decay_t<T>, TRecord>;
 }
 
-inline SimpleType make_primitive(std::string name) {
+// Type creation functions
+SimpleType make_primitive(std::string name) {
   return std::make_shared<TypeNode>(TPrimitive{std::move(name)});
 }
-inline SimpleType make_variable(std::uint32_t id, int lvl) {
+
+SimpleType make_variable(std::uint32_t id, int lvl) {
   return std::make_shared<TypeNode>(
       TVariable{std::make_shared<VariableState>(id, lvl)});
 }
-inline SimpleType fresh_variable(VarSupply &vs, int lvl) {
+
+SimpleType fresh_variable(VarSupply &vs, int lvl) {
   return make_variable(vs.fresh_id(), lvl);
 }
-inline SimpleType make_function(SimpleType a, SimpleType b) {
+
+SimpleType make_function(SimpleType a, SimpleType b) {
   return std::make_shared<TypeNode>(TFunction{std::move(a), std::move(b)});
 }
-inline SimpleType
-make_record(std::vector<std::pair<std::string, SimpleType>> fields) {
+
+SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields) {
   std::sort(fields.begin(), fields.end(),
             [](auto &x, auto &y) { return x.first < y.first; });
   return std::make_shared<TypeNode>(TRecord{std::move(fields)});
@@ -151,35 +109,19 @@ int level_of(const SimpleType &st) {
       st->v);
 }
 
-// ======================= Solver cache & error ==============================
-struct Error {
-  std::string msg;
-  static Error make(std::string m) { return {std::move(m)}; }
-};
+// ======================= Error implementation ==============================
+Error Error::make(std::string m) { return {std::move(m)}; }
 
-using Cache = std::set<std::pair<const TypeNode *, const TypeNode *>>;
-
-// ======================= Extrusion (level-fixing copy) =====================
-// Implements Fig. 7 in the paper. Copies a type to target level `lvl` while
-// respecting polarity and caching (vs,pol) to avoid cycles.
-struct PolarVS {
-  VariableState *vs;
-  bool pos;
-  bool operator<(const PolarVS &other) const {
-    if (vs != other.vs)
-      return vs < other.vs;
-    return pos < other.pos;
-  }
-};
-SimpleType
-extrude(const SimpleType &ty, bool pol, int lvl,
-        std::map<PolarVS, std::shared_ptr<VariableState>> &cache,
-        VarSupply &supply);
-
-SimpleType
-extrude(const SimpleType &ty, bool pol, int lvl,
-        std::map<PolarVS, std::shared_ptr<VariableState>> &cache,
-        VarSupply &supply) {
+// ======================= PolarVS implementation =============================
+bool PolarVS::operator<(const PolarVS &other) const {
+  if (vs != other.vs)
+    return vs < other.vs;
+  return pos < other.pos;
+}
+// ======================= Extrusion implementation =====================
+SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
+                   std::map<PolarVS, std::shared_ptr<VariableState>> &cache,
+                   VarSupply &supply) {
   if (level_of(ty) <= lvl)
     return ty;
 
@@ -231,34 +173,32 @@ extrude(const SimpleType &ty, bool pol, int lvl,
   return std::make_shared<TypeNode>(TVariable{nvs});
 }
 
-// ======================= Subtype constraint solver with levels =============
-// Full spec with level guards + extrusion (Fig. 9).
-// :contentReference[oaicite:5]{index=5}
-std::expected<void, Error> constrain_impl(const SimpleType &lhs,
-                                                 const SimpleType &rhs,
-                                                 Cache &cache,
-                                                 VarSupply &supply);
+// ======================= Subtype constraint solver implementation =============
+expected<void, Error> constrain_impl(const SimpleType &lhs,
+                                     const SimpleType &rhs,
+                                     Cache &cache,
+                                     VarSupply &supply);
 
-std::expected<void, Error> constrain(const SimpleType &lhs,
-                                            const SimpleType &rhs, Cache &cache,
-                                            VarSupply &supply) {
+expected<void, Error> constrain(const SimpleType &lhs,
+                               const SimpleType &rhs, Cache &cache,
+                               VarSupply &supply) {
   auto key = std::make_pair(lhs.get(), rhs.get());
   if (cache.contains(key))
-    return {};
+    return expected<void, Error>{};
   cache.insert(key);
   return constrain_impl(lhs, rhs, cache, supply);
 }
 
-std::expected<void, Error> constrain_impl(const SimpleType &lhs,
-                                                 const SimpleType &rhs,
-                                                 Cache &cache,
-                                                 VarSupply &supply) {
+expected<void, Error> constrain_impl(const SimpleType &lhs,
+                                    const SimpleType &rhs,
+                                    Cache &cache,
+                                    VarSupply &supply) {
   if (auto lp = lhs->getAsTPrimitive()) {
     if (auto rp = rhs->getAsTPrimitive()) {
       if (lp->name == rp->name)
-        return {};
+        return expected<void, Error>{};
       else
-        return std::unexpected(Error::make("primitive mismatch: " + lp->name +
+        return unexpected<Error>(Error::make("primitive mismatch: " + lp->name +
                                            " </: " + rp->name));
     }
   }
@@ -269,7 +209,7 @@ std::expected<void, Error> constrain_impl(const SimpleType &lhs,
         return e;
       if (auto e = constrain(lf->rhs, rf->rhs, cache, supply); !e)
         return e;
-      return {};
+      return expected<void, Error>{};
     }
 
   if (auto lr = lhs->getAsTRecord())
@@ -280,11 +220,11 @@ std::expected<void, Error> constrain_impl(const SimpleType &lhs,
       for (auto const &[n_req, t_req] : rr->fields) {
         auto it = fmap.find(n_req);
         if (it == fmap.end())
-          return std::unexpected(Error::make("missing field: " + n_req));
+          return unexpected<Error>(Error::make("missing field: " + n_req));
         if (auto e = constrain(it->second, t_req, cache, supply); !e)
           return e;
       }
-      return {};
+      return expected<void, Error>{};
     }
 
   if (auto lv = lhs->getAsTVariable()) {
@@ -294,7 +234,7 @@ std::expected<void, Error> constrain_impl(const SimpleType &lhs,
       for (auto const &lb : lv->state->lowerBounds)
         if (auto e = constrain(lb, rhs, cache, supply); !e)
           return e;
-      return {};
+      return expected<void, Error>{};
     }
     // else extrude rhs down to lhs.level (negative polarity) and retry
     // :contentReference[oaicite:6]{index=6}
@@ -309,7 +249,7 @@ std::expected<void, Error> constrain_impl(const SimpleType &lhs,
       for (auto const &ub : rv->state->upperBounds)
         if (auto e = constrain(lhs, ub, cache, supply); !e)
           return e;
-      return {};
+      return expected<void, Error>{};
     }
     // else extrude lhs down to rhs.level (positive polarity) and retry
     // :contentReference[oaicite:7]{index=7}
@@ -318,30 +258,18 @@ std::expected<void, Error> constrain_impl(const SimpleType &lhs,
     return constrain(lhs_ex, rhs, cache, supply);
   }
 
-  return std::unexpected(Error::make("cannot constrain given pair"));
+  return unexpected<Error>(Error::make("cannot constrain given pair"));
 }
 
 // ======================= User-facing algebraic types & coalescing =========
 // (unchanged from previous version, omitted here for brevity in this excerpt)
 // -- keep your existing UType, coalesceType, printU implementation --
 
-// ============= Type schemes (let-polymorphism without AST) =================
-// Matches Fig. 6: SimpleType <: TypeScheme; PolymorphicType(level, body).
-// :contentReference[oaicite:8]{index=8}
-struct MonoScheme {
-  SimpleType body;
-};
-struct PolyScheme {
-  int generalized_above;
-  SimpleType body;
-};
-
-using TypeScheme = std::variant<MonoScheme, PolyScheme>;
-
+// ============= Type schemes implementation =================
 SimpleType freshen_above_rec(const SimpleType &t, int cutoff,
-                                    int at_level,
-                                    std::map<VariableState *, SimpleType> &memo,
-                                    VarSupply &supply) {
+                             int at_level,
+                             std::map<VariableState *, SimpleType> &memo,
+                             VarSupply &supply) {
   return std::visit(
       [&](auto const &n) -> SimpleType {
         using T = std::decay_t<decltype(n)>;
@@ -378,24 +306,22 @@ SimpleType freshen_above_rec(const SimpleType &t, int cutoff,
 }
 
 SimpleType instantiate(const TypeScheme &sch, int at_level,
-                              VarSupply &supply) {
+                      VarSupply &supply) {
   if (auto m = std::get_if<MonoScheme>(&sch))
     return m->body;
   auto const &p = std::get<PolyScheme>(sch);
   std::map<VariableState *, SimpleType> memo;
   return freshen_above_rec(p.body, p.generalized_above, at_level, memo,
-                           supply); // :contentReference[oaicite:9]{index=9}
+                           supply);
 }
 
 // Helper to wrap a rhs type at let generalization point
-inline TypeScheme generalize(const SimpleType &rhs, int env_level) {
+TypeScheme generalize(const SimpleType &rhs, int env_level) {
   return PolyScheme{env_level, rhs};
 }
 
-// ======================= Tiny demo (no AST, just constraints) ==============
+// ======================= Demo implementation ==============
 #ifdef SIMPLESUB_DEMO
-// Demo: let id = \x. x in (id : int->int) & (id : bool->bool)
-// We build constraints by手工：应用时把实参 <: 形参，结果取返回。
 int demo_levels() {
   VarSupply supply;
   Scope env; // level=0
@@ -443,15 +369,11 @@ int demo_levels() {
     return 1;
   }
 
-  // 现在 id 两次使用互不干扰（得到各自的 α1(int)、α2(bool)）
-  std::cout << "Let-polymorphic id instantiated twice without interference.\n";
   return 0;
 }
 #endif
 
 } // namespace simplesub
-
-#endif // SIMPLESUB_CORE_HPP
 
 #ifdef SIMPLESUB_DEMO
 int main() { return simplesub::demo_levels(); }
