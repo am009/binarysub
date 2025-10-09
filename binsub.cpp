@@ -133,19 +133,20 @@ int level_of(const SimpleType &st) {
   return std::visit(
       [](auto const &n) -> int {
         using T = std::decay_t<decltype(n)>;
-        if constexpr (isTPrimitiveType<T>())
+        if constexpr (isTPrimitiveType<T>()) {
           return 0;
-        if constexpr (isTVariableType<T>())
+        } else if constexpr (isTVariableType<T>()) {
           return n.state->level;
-        if constexpr (isTFunctionType<T>())
+        } else if constexpr (isTFunctionType<T>()) {
           return std::max(level_of(n.lhs), level_of(n.rhs));
-        if constexpr (isTRecordType<T>()) {
+        } else if constexpr (isTRecordType<T>()) {
           int m = 0;
           for (auto const &[_, t] : n.fields)
             m = std::max(m, level_of(t));
           return m;
+        } else {
+          static_assert(!sizeof(T), "Unhandled variant type in level_of");
         }
-        return 0;
       },
       st->v);
 }
@@ -344,31 +345,34 @@ SimpleType freshen_above_rec(const SimpleType &t, int cutoff,
   return std::visit(
       [&](auto const &n) -> SimpleType {
         using T = std::decay_t<decltype(n)>;
-        if constexpr (isTPrimitiveType<T>())
+        if constexpr (isTPrimitiveType<T>()) {
           return t;
-        if constexpr (isTFunctionType<T>())
+        } else if constexpr (isTFunctionType<T>()) {
           return make_function(
               freshen_above_rec(n.lhs, cutoff, at_level, memo, supply),
               freshen_above_rec(n.rhs, cutoff, at_level, memo, supply));
-        if constexpr (isTRecordType<T>()) {
+        } else if constexpr (isTRecordType<T>()) {
           std::vector<std::pair<std::string, SimpleType>> fs;
           fs.reserve(n.fields.size());
           for (auto const &[name, sub] : n.fields)
             fs.emplace_back(
                 name, freshen_above_rec(sub, cutoff, at_level, memo, supply));
           return make_record(std::move(fs));
+        } else if constexpr (isTVariableType<T>()) {
+          // TVariable
+          auto *vs = n.state.get();
+          if (vs->level > cutoff) {
+            if (auto it = memo.find(vs); it != memo.end())
+              return it->second;
+            auto fresh =
+                fresh_variable(supply, at_level); // empty bounds, new id/level
+            memo.emplace(vs, fresh);
+            return fresh;
+          }
+          return t;
+        } else {
+          static_assert(!sizeof(T), "Unhandled variant type in freshen_above_rec");
         }
-        // TVariable
-        auto *vs = n.state.get();
-        if (vs->level > cutoff) {
-          if (auto it = memo.find(vs); it != memo.end())
-            return it->second;
-          auto fresh =
-              fresh_variable(supply, at_level); // empty bounds, new id/level
-          memo.emplace(vs, fresh);
-          return fresh;
-        }
-        return t;
       },
       t->v);
 }
