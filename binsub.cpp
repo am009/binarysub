@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <unordered_map>
-#include <unordered_set>
+#include <map>
+#include <set>
 #include <utility>
 #include <variant>
 #include <optional>
@@ -86,31 +86,25 @@ inline int level_of(const SimpleType& st){
 // ======================= Solver cache & error ==============================
 struct Error { std::string msg; static Error make(std::string m){ return {std::move(m)}; } };
 
-struct PtrPairHash {
-  using P = std::pair<const TypeNode*, const TypeNode*>;
-  std::size_t operator()(P const& p) const noexcept {
-    auto h1 = std::hash<const void*>{}(p.first), h2 = std::hash<const void*>{}(p.second);
-    return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1<<6) + (h1>>2));
-  }
-};
-using Cache = std::unordered_set<std::pair<const TypeNode*, const TypeNode*>, PtrPairHash>;
+using Cache = std::set<std::pair<const TypeNode*, const TypeNode*>>;
 
 // ======================= Extrusion (level-fixing copy) =====================
 // Implements Fig. 7 in the paper. Copies a type to target level `lvl` while
 // respecting polarity and caching (vs,pol) to avoid cycles.  :contentReference[oaicite:4]{index=4}
-struct PolarVS { VariableState* vs; bool pos; };
-struct PolarVSHash {
-  std::size_t operator()(PolarVS const& k) const noexcept {
-    auto h1=std::hash<void*>{}(k.vs), h2=std::hash<bool>{}(k.pos);
-    return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1<<6) + (h1>>2));
+struct PolarVS { 
+  VariableState* vs; 
+  bool pos; 
+  bool operator<(const PolarVS& other) const {
+    if (vs != other.vs) return vs < other.vs;
+    return pos < other.pos;
   }
 };
 inline SimpleType extrude(const SimpleType& ty, bool pol, int lvl,
-                          std::unordered_map<PolarVS, std::shared_ptr<VariableState>, PolarVSHash>& cache,
+                          std::map<PolarVS, std::shared_ptr<VariableState>>& cache,
                           VarSupply& supply);
 
 inline SimpleType extrude(const SimpleType& ty, bool pol, int lvl,
-                          std::unordered_map<PolarVS, std::shared_ptr<VariableState>, PolarVSHash>& cache,
+                          std::map<PolarVS, std::shared_ptr<VariableState>>& cache,
                           VarSupply& supply)
 {
   if (level_of(ty) <= lvl) return ty;
@@ -188,7 +182,7 @@ constrain_impl(const SimpleType& lhs, const SimpleType& rhs, Cache& cache, VarSu
   }
 
   if (auto lr = std::get_if<TRecord>(&lhs->v)) if (auto rr = std::get_if<TRecord>(&rhs->v)){
-    std::unordered_map<std::string, SimpleType> fmap; fmap.reserve(lr->fields.size());
+    std::map<std::string, SimpleType> fmap;
     for (auto const& [n,t] : lr->fields) fmap[n]=t;
     for (auto const& [n_req, t_req] : rr->fields) {
       auto it=fmap.find(n_req);
@@ -207,7 +201,7 @@ constrain_impl(const SimpleType& lhs, const SimpleType& rhs, Cache& cache, VarSu
       return {};
     }
     // else extrude rhs down to lhs.level (negative polarity) and retry  :contentReference[oaicite:6]{index=6}
-    std::unordered_map<PolarVS, std::shared_ptr<VariableState>, PolarVSHash> ex;
+    std::map<PolarVS, std::shared_ptr<VariableState>> ex;
     auto rhs_ex = extrude(rhs, /*pol=*/false, lv->state->level, ex, supply);
     return constrain(lhs, rhs_ex, cache, supply);
   }
@@ -220,7 +214,7 @@ constrain_impl(const SimpleType& lhs, const SimpleType& rhs, Cache& cache, VarSu
       return {};
     }
     // else extrude lhs down to rhs.level (positive polarity) and retry  :contentReference[oaicite:7]{index=7}
-    std::unordered_map<PolarVS, std::shared_ptr<VariableState>, PolarVSHash> ex;
+    std::map<PolarVS, std::shared_ptr<VariableState>> ex;
     auto lhs_ex = extrude(lhs, /*pol=*/true, rv->state->level, ex, supply);
     return constrain(lhs_ex, rhs, cache, supply);
   }
@@ -240,7 +234,7 @@ struct PolyScheme  { int generalized_above; SimpleType body; };
 using TypeScheme = std::variant<MonoScheme, PolyScheme>;
 
 inline SimpleType freshen_above_rec(const SimpleType& t, int cutoff, int at_level,
-                                    std::unordered_map<VariableState*, SimpleType>& memo,
+                                    std::map<VariableState*, SimpleType>& memo,
                                     VarSupply& supply)
 {
   return std::visit([&](auto const& n)->SimpleType{
@@ -270,7 +264,7 @@ inline SimpleType freshen_above_rec(const SimpleType& t, int cutoff, int at_leve
 inline SimpleType instantiate(const TypeScheme& sch, int at_level, VarSupply& supply){
   if (auto m = std::get_if<MonoScheme>(&sch)) return m->body;
   auto const& p = std::get<PolyScheme>(sch);
-  std::unordered_map<VariableState*, SimpleType> memo;
+  std::map<VariableState*, SimpleType> memo;
   return freshen_above_rec(p.body, p.generalized_above, at_level, memo, supply); // :contentReference[oaicite:9]{index=9}
 }
 
