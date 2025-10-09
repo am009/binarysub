@@ -233,12 +233,12 @@ extrude(const SimpleType &ty, bool pol, int lvl,
 // ======================= Subtype constraint solver with levels =============
 // Full spec with level guards + extrusion (Fig. 9).
 // :contentReference[oaicite:5]{index=5}
-inline std::expected<void, Error> constrain_impl(const SimpleType &lhs,
+std::expected<void, Error> constrain_impl(const SimpleType &lhs,
                                                  const SimpleType &rhs,
                                                  Cache &cache,
                                                  VarSupply &supply);
 
-inline std::expected<void, Error> constrain(const SimpleType &lhs,
+std::expected<void, Error> constrain(const SimpleType &lhs,
                                             const SimpleType &rhs, Cache &cache,
                                             VarSupply &supply) {
   auto key = std::make_pair(lhs.get(), rhs.get());
@@ -248,7 +248,7 @@ inline std::expected<void, Error> constrain(const SimpleType &lhs,
   return constrain_impl(lhs, rhs, cache, supply);
 }
 
-inline std::expected<void, Error> constrain_impl(const SimpleType &lhs,
+std::expected<void, Error> constrain_impl(const SimpleType &lhs,
                                                  const SimpleType &rhs,
                                                  Cache &cache,
                                                  VarSupply &supply) {
@@ -337,7 +337,7 @@ struct PolyScheme {
 
 using TypeScheme = std::variant<MonoScheme, PolyScheme>;
 
-inline SimpleType freshen_above_rec(const SimpleType &t, int cutoff,
+SimpleType freshen_above_rec(const SimpleType &t, int cutoff,
                                     int at_level,
                                     std::map<VariableState *, SimpleType> &memo,
                                     VarSupply &supply) {
@@ -373,7 +373,7 @@ inline SimpleType freshen_above_rec(const SimpleType &t, int cutoff,
       t->v);
 }
 
-inline SimpleType instantiate(const TypeScheme &sch, int at_level,
+SimpleType instantiate(const TypeScheme &sch, int at_level,
                               VarSupply &supply) {
   if (auto m = std::get_if<MonoScheme>(&sch))
     return m->body;
@@ -392,7 +392,7 @@ inline TypeScheme generalize(const SimpleType &rhs, int env_level) {
 #ifdef SIMPLESUB_DEMO
 // Demo: let id = \x. x in (id : int->int) & (id : bool->bool)
 // We build constraints by手工：应用时把实参 <: 形参，结果取返回。
-inline int demo_levels() {
+int demo_levels() {
   VarSupply supply;
   Scope env; // level=0
 
