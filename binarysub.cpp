@@ -616,7 +616,8 @@ int demo_twice() {
   std::cout << "  α <: γ → δ  (f must accept γ and return final result δ)\n";
   
   // Show final twice type after all constraints
-  std::cout << "  Final twice type: " << printType(coalesceType(twice_type)) << "\n\n";
+  std::cout << "  Final twice type: " << printType(coalesceType(twice_type)) << "\n";
+  std::cout << "  After simplification: " << printType(simplifyType(coalesceType(twice_type))) << "\n\n";
   
   // At this point, α has two upper bounds: (β → γ) and (γ → δ)
   // Check that the variables are properly constrained
@@ -829,7 +830,11 @@ void analyzeOccurrencesImpl(const UTypePtr& ty, bool positive, OccurrenceMap& oc
                            std::set<std::uint32_t>& currentContext) {
   std::visit([&](auto const& n) {
     using T = std::decay_t<decltype(n)>;
-    if constexpr (std::is_same_v<T, UTypeVariable>) {
+    if constexpr (std::is_same_v<T, UTop>) {
+      // Top doesn't contribute to co-occurrence
+    } else if constexpr (std::is_same_v<T, UBot>) {
+      // Bot doesn't contribute to co-occurrence
+    } else if constexpr (std::is_same_v<T, UTypeVariable>) {
       std::uint32_t varId = extractVariableId(n.name);
       if (varId != 0) {
         auto& occ = occMap[varId];
@@ -887,8 +892,9 @@ void analyzeOccurrencesImpl(const UTypePtr& ty, bool positive, OccurrenceMap& oc
     } else if constexpr (std::is_same_v<T, URecursiveType>) {
       // Recursive types: analyze body
       analyzeOccurrencesImpl(n.body, positive, occMap, currentContext);
+    } else {
+      static_assert(!sizeof(T), "Unhandled UType variant in analyzeOccurrencesImpl");
     }
-    // Top and Bot don't contribute to co-occurrence
   }, ty->v);
 }
 
@@ -903,7 +909,13 @@ OccurrenceMap analyzeOccurrences(const UTypePtr& ty) {
 UTypePtr removePolarVariables(const UTypePtr& ty, const OccurrenceMap& occMap) {
   return std::visit([&](auto const& n) -> UTypePtr {
     using T = std::decay_t<decltype(n)>;
-    if constexpr (std::is_same_v<T, UTypeVariable>) {
+    if constexpr (std::is_same_v<T, UTop>) {
+      return ty; // Top unchanged
+    } else if constexpr (std::is_same_v<T, UBot>) {
+      return ty; // Bot unchanged
+    } else if constexpr (std::is_same_v<T, UPrimitiveType>) {
+      return ty; // Primitive unchanged
+    } else if constexpr (std::is_same_v<T, UTypeVariable>) {
       std::uint32_t varId = extractVariableId(n.name);
       if (varId != 0) {
         auto it = occMap.find(varId);
@@ -948,7 +960,7 @@ UTypePtr removePolarVariables(const UTypePtr& ty, const OccurrenceMap& occMap) {
     } else if constexpr (std::is_same_v<T, URecursiveType>) {
       return make_urecursivetype(n.name, removePolarVariables(n.body, occMap));
     } else {
-      return ty; // Top, Bot, Primitive unchanged
+      static_assert(!sizeof(T), "Unhandled UType variant in removePolarVariables");
     }
   }, ty->v);
 }
@@ -957,7 +969,13 @@ UTypePtr removePolarVariables(const UTypePtr& ty, const OccurrenceMap& occMap) {
 UTypePtr flattenVariableSandwiches(const UTypePtr& ty, const OccurrenceMap& occMap) {
   return std::visit([&](auto const& n) -> UTypePtr {
     using T = std::decay_t<decltype(n)>;
-    if constexpr (std::is_same_v<T, UTypeVariable>) {
+    if constexpr (std::is_same_v<T, UTop>) {
+      return ty; // Top unchanged
+    } else if constexpr (std::is_same_v<T, UBot>) {
+      return ty; // Bot unchanged
+    } else if constexpr (std::is_same_v<T, UPrimitiveType>) {
+      return ty; // Primitive unchanged
+    } else if constexpr (std::is_same_v<T, UTypeVariable>) {
       std::uint32_t varId = extractVariableId(n.name);
       if (varId != 0) {
         auto it = occMap.find(varId);
@@ -995,7 +1013,7 @@ UTypePtr flattenVariableSandwiches(const UTypePtr& ty, const OccurrenceMap& occM
     } else if constexpr (std::is_same_v<T, URecursiveType>) {
       return make_urecursivetype(n.name, flattenVariableSandwiches(n.body, occMap));
     } else {
-      return ty;
+      static_assert(!sizeof(T), "Unhandled UType variant in flattenVariableSandwiches");
     }
   }, ty->v);
 }
@@ -1028,7 +1046,13 @@ UTypePtr unifyIndistinguishableVariables(const UTypePtr& ty, const OccurrenceMap
   std::function<UTypePtr(const UTypePtr&)> substitute = [&](const UTypePtr& t) -> UTypePtr {
     return std::visit([&](auto const& n) -> UTypePtr {
       using T = std::decay_t<decltype(n)>;
-      if constexpr (std::is_same_v<T, UTypeVariable>) {
+      if constexpr (std::is_same_v<T, UTop>) {
+        return t; // Top unchanged
+      } else if constexpr (std::is_same_v<T, UBot>) {
+        return t; // Bot unchanged
+      } else if constexpr (std::is_same_v<T, UPrimitiveType>) {
+        return t; // Primitive unchanged
+      } else if constexpr (std::is_same_v<T, UTypeVariable>) {
         std::uint32_t varId = extractVariableId(n.name);
         if (varId != 0 && representatives.count(varId)) {
           std::uint32_t rep = representatives[varId];
@@ -1053,7 +1077,7 @@ UTypePtr unifyIndistinguishableVariables(const UTypePtr& ty, const OccurrenceMap
       } else if constexpr (std::is_same_v<T, URecursiveType>) {
         return make_urecursivetype(n.name, substitute(n.body));
       } else {
-        return t;
+        static_assert(!sizeof(T), "Unhandled UType variant in substitute");
       }
     }, t->v);
   };
@@ -1073,7 +1097,15 @@ UTypePtr hashConsType(const UTypePtr& ty, TypeHashMap& hashMap) {
   // Recursively hash cons subterms first
   UTypePtr result = std::visit([&](auto const& n) -> UTypePtr {
     using T = std::decay_t<decltype(n)>;
-    if constexpr (std::is_same_v<T, UFunctionType>) {
+    if constexpr (std::is_same_v<T, UTop>) {
+      return ty; // Top unchanged
+    } else if constexpr (std::is_same_v<T, UBot>) {
+      return ty; // Bot unchanged
+    } else if constexpr (std::is_same_v<T, UPrimitiveType>) {
+      return ty; // Primitive unchanged
+    } else if constexpr (std::is_same_v<T, UTypeVariable>) {
+      return ty; // Variable unchanged
+    } else if constexpr (std::is_same_v<T, UFunctionType>) {
       return make_ufunctiontype(
           hashConsType(n.lhs, hashMap),
           hashConsType(n.rhs, hashMap));
@@ -1095,7 +1127,7 @@ UTypePtr hashConsType(const UTypePtr& ty, TypeHashMap& hashMap) {
     } else if constexpr (std::is_same_v<T, URecursiveType>) {
       return make_urecursivetype(n.name, hashConsType(n.body, hashMap));
     } else {
-      return ty; // Primitive types, variables, top, bot unchanged
+      static_assert(!sizeof(T), "Unhandled UType variant in hashConsType");
     }
   }, ty->v);
   
