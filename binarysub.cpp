@@ -371,10 +371,103 @@ int demo_levels() {
 
   return 0;
 }
+
+// Test function based on the "twice" example from simplesub paper Section 3.4.2
+// twice = λf. λx. f(f x)
+// Expected type: (α → β) → α → β  (after constraint propagation)
+int demo_twice() {
+  VarSupply supply;
+  Cache cache;
+  
+  // Create type variables for the twice function: λf. λx. f(f x)
+  auto alpha = fresh_variable(supply, 0);     // f's type
+  auto beta = fresh_variable(supply, 0);      // x's type  
+  auto gamma = fresh_variable(supply, 0);     // result of f x
+  auto delta = fresh_variable(supply, 0);     // final result
+  
+  std::cout << "=== Testing twice function type inference ===\n";
+  std::cout << "twice = λf. λx. f(f x)\n";
+  
+  // Step 1: Analyze inner application f x
+  // For f x to be valid: f must be a function (β → γ)
+  // So we constrain: α <: (β → γ)  
+  auto f_inner_type = make_function(beta, gamma);
+  if (auto e = constrain(alpha, f_inner_type, cache, supply); !e) {
+    std::cerr << "Failed to constrain f for inner application: " << e.error().msg << "\n";
+    return 1;
+  }
+  std::cout << "✓ Constrained f type for inner application f x\n";
+  
+  // Step 2: Analyze outer application f (f x)  
+  // For f (f x) to be valid: f must be a function (γ → δ)
+  // So we constrain: α <: (γ → δ)
+  auto f_outer_type = make_function(gamma, delta);
+  if (auto e = constrain(alpha, f_outer_type, cache, supply); !e) {
+    std::cerr << "Failed to constrain f for outer application: " << e.error().msg << "\n";
+    return 1;
+  }
+  std::cout << "✓ Constrained f type for outer application f(f x)\n";
+  
+  // At this point, α has two upper bounds: (β → γ) and (γ → δ)
+  // Check that the variables are properly constrained
+  auto alpha_var = alpha->getAsTVariable();
+  if (!alpha_var || alpha_var->state->upperBounds.size() != 2) {
+    std::cerr << "Error: α should have exactly 2 upper bounds\n";
+    return 1;
+  }
+  
+  std::cout << "✓ Alpha has " << alpha_var->state->upperBounds.size() << " upper bounds as expected\n";
+  
+  // Test type soundness with concrete types
+  // If we apply twice to a function int → int, everything should work
+  auto int_type = make_primitive("int");
+  auto int_to_int = make_function(int_type, int_type);
+  
+  Cache test_cache = cache; // copy cache for this test
+  
+  // Constrain α to be int → int (simulating applying twice to an int → int function)
+  if (auto e = constrain(int_to_int, alpha, test_cache, supply); !e) {
+    std::cerr << "Failed to apply twice to int → int function: " << e.error().msg << "\n";
+    return 1;
+  }
+  
+  // Now constrain β to int (simulating applying the result to an int)
+  if (auto e = constrain(int_type, beta, test_cache, supply); !e) {
+    std::cerr << "Failed to apply result to int: " << e.error().msg << "\n";
+    return 1;
+  }
+  
+  // The result δ should be compatible with int
+  if (auto e = constrain(delta, int_type, test_cache, supply); !e) {
+    std::cerr << "Result type incompatible with int: " << e.error().msg << "\n";
+    return 1;
+  }
+  
+  std::cout << "✓ Successfully applied twice to int → int function\n";
+  std::cout << "✓ Result type is correctly int\n";
+  
+  std::cout << "=== All twice function tests passed! ===\n";
+  return 0;
+}
 #endif
 
 } // namespace simplesub
 
 #ifdef SIMPLESUB_DEMO
-int main() { return simplesub::demo_levels(); }
+int main() { 
+  int result1 = simplesub::demo_levels();
+  if (result1 != 0) {
+    std::cerr << "demo_levels failed\n";
+    return result1;
+  }
+  
+  int result2 = simplesub::demo_twice();
+  if (result2 != 0) {
+    std::cerr << "demo_twice failed\n";
+    return result2;
+  }
+  
+  std::cout << "All demos passed!\n";
+  return 0;
+}
 #endif

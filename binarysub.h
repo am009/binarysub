@@ -225,6 +225,7 @@ TypeScheme generalize(const SimpleType &rhs, int env_level);
 // ======================= Demo function =======================
 #ifdef SIMPLESUB_DEMO
 int demo_levels();
+int demo_twice();
 #endif
 
 } // namespace simplesub
