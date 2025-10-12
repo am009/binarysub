@@ -59,27 +59,27 @@ struct TRecord {
 
 struct TypeNode {
   std::variant<TPrimitive, TVariable, TFunction, TRecord> v;
-  
+
   explicit TypeNode(TPrimitive p);
   explicit TypeNode(TVariable v_);
   explicit TypeNode(TFunction f);
   explicit TypeNode(TRecord r);
-  
-  TPrimitive* getAsTPrimitive();
-  const TPrimitive* getAsTPrimitive() const;
-  
-  TVariable* getAsTVariable();
-  const TVariable* getAsTVariable() const;
-  
-  TFunction* getAsTFunction();
-  const TFunction* getAsTFunction() const;
-  
-  TRecord* getAsTRecord();
-  const TRecord* getAsTRecord() const;
-  
-  TFunction& getAsTFunctionRef();
-  const TFunction& getAsTFunctionRef() const;
-  
+
+  TPrimitive *getAsTPrimitive();
+  const TPrimitive *getAsTPrimitive() const;
+
+  TVariable *getAsTVariable();
+  const TVariable *getAsTVariable() const;
+
+  TFunction *getAsTFunction();
+  const TFunction *getAsTFunction() const;
+
+  TRecord *getAsTRecord();
+  const TRecord *getAsTRecord() const;
+
+  TFunction &getAsTFunctionRef();
+  const TFunction &getAsTFunctionRef() const;
+
   bool isTPrimitive() const;
   bool isTVariable() const;
   bool isTFunction() const;
@@ -87,17 +87,13 @@ struct TypeNode {
 };
 
 // Helper functions for type checking variant types directly
-template<typename T>
-constexpr bool isTPrimitiveType();
+template <typename T> constexpr bool isTPrimitiveType();
 
-template<typename T>
-constexpr bool isTVariableType();
+template <typename T> constexpr bool isTVariableType();
 
-template<typename T>
-constexpr bool isTFunctionType();
+template <typename T> constexpr bool isTFunctionType();
 
-template<typename T>
-constexpr bool isTRecordType();
+template <typename T> constexpr bool isTRecordType();
 
 // Type creation functions
 SimpleType make_primitive(std::string name);
@@ -110,65 +106,64 @@ SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields);
 int level_of(const SimpleType &st);
 
 // Forward declaration for error handling
-template<typename E>
-class unexpected {
+template <typename E> class unexpected {
 public:
-    unexpected(E&& error) : error_(std::move(error)) {}
-    unexpected(const E& error) : error_(error) {}
-    const E& error() const { return error_; }
+  unexpected(E &&error) : error_(std::move(error)) {}
+  unexpected(const E &error) : error_(error) {}
+  const E &error() const { return error_; }
+
 private:
-    E error_;
+  E error_;
 };
 
-template<typename E>
-unexpected<E> make_unexpected(E&& error) {
-    return unexpected<E>(std::forward<E>(error));
+template <typename E> unexpected<E> make_unexpected(E &&error) {
+  return unexpected<E>(std::forward<E>(error));
 }
 
-template<typename T, typename E>
-class expected {
+template <typename T, typename E> class expected {
 public:
-    expected() : has_value_(true) {}
-    expected(const T& value) : has_value_(true), value_(value) {}
-    
-    template<typename U>
-    expected(const unexpected<U>& error) : has_value_(false), error_(error.error()) {}
-    
-    bool has_value() const { return has_value_; }
-    operator bool() const { return has_value_; }
-    bool operator!() const { return !has_value_; }
-    
-    const T& value() const { return value_; }
-    T& value() { return value_; }
-    
-    const E& error() const { return error_; }
-    
+  expected() : has_value_(true) {}
+  expected(const T &value) : has_value_(true), value_(value) {}
+
+  template <typename U>
+  expected(const unexpected<U> &error)
+      : has_value_(false), error_(error.error()) {}
+
+  bool has_value() const { return has_value_; }
+  operator bool() const { return has_value_; }
+  bool operator!() const { return !has_value_; }
+
+  const T &value() const { return value_; }
+  T &value() { return value_; }
+
+  const E &error() const { return error_; }
+
 private:
-    bool has_value_;
-    union {
-        T value_;
-        E error_;
-    };
+  bool has_value_;
+  union {
+    T value_;
+    E error_;
+  };
 };
 
 // Specialization for void
-template<typename E>
-class expected<void, E> {
+template <typename E> class expected<void, E> {
 public:
-    expected() : has_value_(true) {}
-    
-    template<typename U>
-    expected(const unexpected<U>& error) : has_value_(false), error_(error.error()) {}
-    
-    bool has_value() const { return has_value_; }
-    operator bool() const { return has_value_; }
-    bool operator!() const { return !has_value_; }
-    
-    const E& error() const { return error_; }
-    
+  expected() : has_value_(true) {}
+
+  template <typename U>
+  expected(const unexpected<U> &error)
+      : has_value_(false), error_(error.error()) {}
+
+  bool has_value() const { return has_value_; }
+  operator bool() const { return has_value_; }
+  bool operator!() const { return !has_value_; }
+
+  const E &error() const { return error_; }
+
 private:
-    bool has_value_;
-    E error_;
+  bool has_value_;
+  E error_;
 };
 
 // ======================= Solver cache & error ==============================
@@ -191,15 +186,12 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
                    VarSupply &supply);
 
 // ======================= Subtype constraint solver with levels =============
-expected<void, Error> constrain(const SimpleType &lhs,
-                                const SimpleType &rhs, 
-                                Cache &cache,
-                                VarSupply &supply);
+expected<void, Error> constrain(const SimpleType &lhs, const SimpleType &rhs,
+                                Cache &cache, VarSupply &supply);
 
 expected<void, Error> constrain_impl(const SimpleType &lhs,
-                                    const SimpleType &rhs,
-                                    Cache &cache,
-                                    VarSupply &supply);
+                                     const SimpleType &rhs, Cache &cache,
+                                     VarSupply &supply);
 
 // ======================= User-facing algebraic types ========================
 
@@ -233,9 +225,10 @@ struct URecursiveType {
 };
 
 struct UType {
-  std::variant<UTop, UBot, UUnion, UInter, UFunctionType, URecordType, 
-               URecursiveType, UTypeVariable, UPrimitiveType> v;
-  
+  std::variant<UTop, UBot, UUnion, UInter, UFunctionType, URecordType,
+               URecursiveType, UTypeVariable, UPrimitiveType>
+      v;
+
   explicit UType(UTop t) : v(std::move(t)) {}
   explicit UType(UBot b) : v(std::move(b)) {}
   explicit UType(UUnion u) : v(std::move(u)) {}
@@ -260,41 +253,45 @@ UTypePtr make_uprimitivetype(std::string name);
 
 // Type coalescing
 struct PolarVar {
-  VariableState* vs;
-  bool polar;  // true = positive, false = negative
-  bool operator<(const PolarVar& other) const;
+  VariableState *vs;
+  bool polar; // true = positive, false = negative
+  bool operator<(const PolarVar &other) const;
 };
 
-UTypePtr coalesceType(const SimpleType& st);
-UTypePtr coalesceTypeImpl(const SimpleType& st, bool polar, 
-                         std::set<PolarVar>& inProcess,
-                         std::map<PolarVar, std::string>& recursive);
+UTypePtr coalesceType(const SimpleType &st);
+UTypePtr coalesceTypeImpl(const SimpleType &st, bool polar,
+                          std::set<PolarVar> &inProcess,
+                          std::map<PolarVar, std::string> &recursive);
 
-// Pretty printing  
-std::string printType(const UTypePtr& ty);
-void printTypeImpl(const UTypePtr& ty, std::ostream& os, int precedence = 0);
+// Pretty printing
+std::string printType(const UTypePtr &ty);
+void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence = 0);
 
 // =================== Type Simplification ===========================
 
 // Intermediate representation for simplification (Section 4.4)
 struct CompactType {
-  std::set<std::uint32_t> vars;                                    // type variables
-  std::set<std::string> prims;                                     // primitive types  
-  std::optional<std::map<std::string, std::shared_ptr<CompactType>>> record; // record fields
-  std::optional<std::pair<std::shared_ptr<CompactType>, std::shared_ptr<CompactType>>> function; // function type
+  std::set<std::uint32_t> vars; // type variables
+  std::set<std::string> prims;  // primitive types
+  std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
+      record; // record fields
+  std::optional<
+      std::pair<std::shared_ptr<CompactType>, std::shared_ptr<CompactType>>>
+      function; // function type
 };
 
 struct CompactTypeScheme {
   std::shared_ptr<CompactType> cty;
-  std::map<std::uint32_t, std::shared_ptr<CompactType>> recVars; // recursive variable bounds
+  std::map<std::uint32_t, std::shared_ptr<CompactType>>
+      recVars; // recursive variable bounds
 };
 
 // Co-occurrence analysis data structures
 struct CoOccurrence {
-  std::set<std::uint32_t> positiveVars;    // variables that co-occur positively
-  std::set<std::uint32_t> negativeVars;    // variables that co-occur negatively
-  std::set<std::string> positivePrims;     // primitives that co-occur positively
-  std::set<std::string> negativePrims;     // primitives that co-occur negatively
+  std::set<std::uint32_t> positiveVars; // variables that co-occur positively
+  std::set<std::uint32_t> negativeVars; // variables that co-occur negatively
+  std::set<std::string> positivePrims;  // primitives that co-occur positively
+  std::set<std::string> negativePrims;  // primitives that co-occur negatively
 };
 
 // Variable occurrence analysis
@@ -307,29 +304,32 @@ struct VariableOccurrence {
 using OccurrenceMap = std::map<std::uint32_t, VariableOccurrence>;
 
 // Simplification functions
-UTypePtr simplifyType(const UTypePtr& ty);
-CompactTypeScheme compactType(const SimpleType& st);
-UTypePtr coalesceCompactType(const CompactTypeScheme& scheme);
+UTypePtr simplifyType(const UTypePtr &ty);
+CompactTypeScheme compactType(const SimpleType &st);
+UTypePtr coalesceCompactType(const CompactTypeScheme &scheme);
 
 // CompactType helper functions
 std::shared_ptr<CompactType> make_empty_compact_type();
-std::shared_ptr<CompactType> merge_compact_types(bool pol, 
-    const std::shared_ptr<CompactType>& lhs, 
-    const std::shared_ptr<CompactType>& rhs);
+std::shared_ptr<CompactType>
+merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
+                    const std::shared_ptr<CompactType> &rhs);
 
-// Analysis functions  
-OccurrenceMap analyzeOccurrences(const UTypePtr& ty);
-void analyzeOccurrencesImpl(const UTypePtr& ty, bool positive, OccurrenceMap& occMap, 
-                           std::set<std::uint32_t>& currentContext);
+// Analysis functions
+OccurrenceMap analyzeOccurrences(const UTypePtr &ty);
+void analyzeOccurrencesImpl(const UTypePtr &ty, bool positive,
+                            OccurrenceMap &occMap,
+                            std::set<std::uint32_t> &currentContext);
 
 // Simplification transformations
-UTypePtr removePolarVariables(const UTypePtr& ty, const OccurrenceMap& occMap);
-UTypePtr unifyIndistinguishableVariables(const UTypePtr& ty, const OccurrenceMap& occMap);
-UTypePtr flattenVariableSandwiches(const UTypePtr& ty, const OccurrenceMap& occMap);
+UTypePtr removePolarVariables(const UTypePtr &ty, const OccurrenceMap &occMap);
+UTypePtr unifyIndistinguishableVariables(const UTypePtr &ty,
+                                         const OccurrenceMap &occMap);
+UTypePtr flattenVariableSandwiches(const UTypePtr &ty,
+                                   const OccurrenceMap &occMap);
 
 // Hash consing support
 using TypeHashMap = std::map<std::string, UTypePtr>;
-UTypePtr hashConsType(const UTypePtr& ty, TypeHashMap& hashMap);
+UTypePtr hashConsType(const UTypePtr &ty, TypeHashMap &hashMap);
 
 // ============= Type schemes (let-polymorphism without AST) =================
 struct MonoScheme {
@@ -343,13 +343,11 @@ struct PolyScheme {
 
 using TypeScheme = std::variant<MonoScheme, PolyScheme>;
 
-SimpleType freshen_above_rec(const SimpleType &t, int cutoff,
-                            int at_level,
-                            std::map<VariableState *, SimpleType> &memo,
-                            VarSupply &supply);
+SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
+                             std::map<VariableState *, SimpleType> &memo,
+                             VarSupply &supply);
 
-SimpleType instantiate(const TypeScheme &sch, int at_level,
-                      VarSupply &supply);
+SimpleType instantiate(const TypeScheme &sch, int at_level, VarSupply &supply);
 
 TypeScheme generalize(const SimpleType &rhs, int env_level);
 
