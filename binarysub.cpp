@@ -1,4 +1,4 @@
-#include "binsub.h"
+#include "binarysub.h"
 
 namespace simplesub {
 

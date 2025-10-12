@@ -1,5 +1,5 @@
-#ifndef BINSUB_H
-#define BINSUB_H
+#ifndef BINARYSUB_H
+#define BINARYSUB_H
 
 #include <algorithm>
 #include <cassert>
@@ -229,4 +229,4 @@ int demo_levels();
 
 } // namespace simplesub
 
-#endif // BINSUB_H
+#endif // BINARYSUB_H
