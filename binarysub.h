@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -273,6 +274,57 @@ UTypePtr coalesceTypeImpl(const SimpleType& st, bool polar,
 std::string printType(const UTypePtr& ty);
 void printTypeImpl(const UTypePtr& ty, std::ostream& os, int precedence = 0);
 
+// =================== Type Simplification ===========================
+
+// Intermediate representation for simplification (Section 4.4)
+struct CompactType {
+  std::set<std::uint32_t> vars;                                    // type variables
+  std::set<std::string> prims;                                     // primitive types  
+  std::optional<std::map<std::string, std::shared_ptr<CompactType>>> record; // record fields
+  std::optional<std::pair<std::shared_ptr<CompactType>, std::shared_ptr<CompactType>>> function; // function type
+};
+
+struct CompactTypeScheme {
+  std::shared_ptr<CompactType> cty;
+  std::map<std::uint32_t, std::shared_ptr<CompactType>> recVars; // recursive variable bounds
+};
+
+// Co-occurrence analysis data structures
+struct CoOccurrence {
+  std::set<std::uint32_t> positiveVars;    // variables that co-occur positively
+  std::set<std::uint32_t> negativeVars;    // variables that co-occur negatively
+  std::set<std::string> positivePrims;     // primitives that co-occur positively
+  std::set<std::string> negativePrims;     // primitives that co-occur negatively
+};
+
+// Variable occurrence analysis
+struct VariableOccurrence {
+  bool appearsPositive = false;
+  bool appearsNegative = false;
+  CoOccurrence coOccurs;
+};
+
+using OccurrenceMap = std::map<std::uint32_t, VariableOccurrence>;
+
+// Simplification functions
+UTypePtr simplifyType(const UTypePtr& ty);
+CompactTypeScheme compactType(const SimpleType& st);
+UTypePtr coalesceCompactType(const CompactTypeScheme& scheme);
+
+// Analysis functions  
+OccurrenceMap analyzeOccurrences(const UTypePtr& ty);
+void analyzeOccurrencesImpl(const UTypePtr& ty, bool positive, OccurrenceMap& occMap, 
+                           std::set<std::uint32_t>& currentContext);
+
+// Simplification transformations
+UTypePtr removePolarVariables(const UTypePtr& ty, const OccurrenceMap& occMap);
+UTypePtr unifyIndistinguishableVariables(const UTypePtr& ty, const OccurrenceMap& occMap);
+UTypePtr flattenVariableSandwiches(const UTypePtr& ty, const OccurrenceMap& occMap);
+
+// Hash consing support
+using TypeHashMap = std::map<std::string, UTypePtr>;
+UTypePtr hashConsType(const UTypePtr& ty, TypeHashMap& hashMap);
+
 // ============= Type schemes (let-polymorphism without AST) =================
 struct MonoScheme {
   SimpleType body;
@@ -299,6 +351,7 @@ TypeScheme generalize(const SimpleType &rhs, int env_level);
 #ifdef SIMPLESUB_DEMO
 int demo_levels();
 int demo_twice();
+int demo_simplification(); // New simplification tests
 #endif
 
 } // namespace simplesub

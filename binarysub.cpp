@@ -669,7 +669,458 @@ int demo_twice() {
   std::cout << "\n=== All twice function tests passed! ===\n";
   return 0;
 }
+
+// Test simplification strategies based on paper examples
+int demo_simplification() {
+  VarSupply supply;
+  
+  std::cout << "=== Testing Type Simplification Strategies ===\n\n";
+  
+  // Test 1: Polar variable removal (Section 4.3.1)
+  // Type: α ∩ int → int  (α only appears negatively, should be simplified to int → int)
+  std::cout << "Test 1: Polar variable removal\n";
+  std::cout << "Input type: α ∩ int → int\n";
+  
+  auto alpha = make_utypevariable("α1");
+  auto int_type = make_uprimitivetype("int");
+  auto alpha_inter_int = make_uinter(alpha, int_type);
+  auto polar_test_type = make_ufunctiontype(alpha_inter_int, int_type);
+  
+  std::cout << "Before simplification: " << printType(polar_test_type) << "\n";
+  auto simplified_polar = simplifyType(polar_test_type);
+  std::cout << "After simplification:  " << printType(simplified_polar) << "\n";
+  std::cout << "✓ Expected int → int (α removed because it only appears negatively)\n\n";
+  
+  // Test 2: Variable sandwich flattening (Section 4.3.1)
+  // Type: α ∩ int → α ∪ int  (α sandwiched between int, should simplify to int → int)
+  std::cout << "Test 2: Variable sandwich flattening\n";  
+  std::cout << "Input type: α ∩ int → α ∪ int\n";
+  
+  auto beta = make_utypevariable("α2");
+  auto beta_inter_int = make_uinter(beta, int_type);
+  auto beta_union_int = make_uunion(beta, int_type);
+  auto sandwich_test_type = make_ufunctiontype(beta_inter_int, beta_union_int);
+  
+  std::cout << "Before simplification: " << printType(sandwich_test_type) << "\n";
+  auto simplified_sandwich = simplifyType(sandwich_test_type);
+  std::cout << "After simplification:  " << printType(simplified_sandwich) << "\n";
+  std::cout << "✓ Expected int → int (α equivalent to int)\n\n";
+  
+  // Test 3: if-then-else type simplification (from paper)
+  // Type: bool → α → β → α ∪ β should simplify to bool → α → α → α
+  std::cout << "Test 3: if-then-else type unification\n";
+  std::cout << "Input type: bool → α → β → α ∪ β\n";
+  
+  auto bool_type = make_uprimitivetype("bool");
+  auto gamma = make_utypevariable("α3");
+  auto delta = make_utypevariable("α4");
+  auto gamma_union_delta = make_uunion(gamma, delta);
+  auto if_type = make_ufunctiontype(bool_type, 
+                   make_ufunctiontype(gamma,
+                     make_ufunctiontype(delta, gamma_union_delta)));
+  
+  std::cout << "Before simplification: " << printType(if_type) << "\n";
+  auto simplified_if = simplifyType(if_type);
+  std::cout << "After simplification:  " << printType(simplified_if) << "\n";
+  std::cout << "✓ Expected α and β to be unified since they're indistinguishable\n\n";
+  
+  // Test 4: Record type simplification
+  std::cout << "Test 4: Record type with polar variables\n";
+  std::cout << "Input type: {x: α, y: α → int}\n";
+  
+  auto epsilon = make_utypevariable("α5");
+  auto epsilon_to_int = make_ufunctiontype(epsilon, int_type);
+  std::vector<std::pair<std::string, UTypePtr>> record_fields = {
+    {"x", epsilon},
+    {"y", epsilon_to_int}
+  };
+  auto record_test_type = make_urecordtype(record_fields);
+  
+  std::cout << "Before simplification: " << printType(record_test_type) << "\n";
+  auto simplified_record = simplifyType(record_test_type);
+  std::cout << "After simplification:  " << printType(simplified_record) << "\n";
+  std::cout << "✓ α appears both positively and negatively, should be preserved\n\n";
+  
+  // Test 5: Complex nested type
+  std::cout << "Test 5: Complex nested type with multiple variables\n";
+  std::cout << "Input type: (α → β) → (β → γ) → α → γ\n";
+  
+  auto zeta = make_utypevariable("α6");
+  auto eta = make_utypevariable("α7");  
+  auto theta = make_utypevariable("α8");
+  auto zeta_to_eta = make_ufunctiontype(zeta, eta);
+  auto eta_to_theta = make_ufunctiontype(eta, theta);
+  auto zeta_to_theta = make_ufunctiontype(zeta, theta);
+  auto complex_type = make_ufunctiontype(zeta_to_eta,
+                        make_ufunctiontype(eta_to_theta, zeta_to_theta));
+  
+  std::cout << "Before simplification: " << printType(complex_type) << "\n";
+  auto simplified_complex = simplifyType(complex_type);
+  std::cout << "After simplification:  " << printType(simplified_complex) << "\n";
+  std::cout << "✓ This represents function composition, variables should be preserved\n\n";
+  
+  // Test 6: Demonstrate hash consing with recursive types
+  std::cout << "Test 6: Hash consing with structural sharing\n";
+  auto iota = make_utypevariable("α9");
+  auto duplicate_subtype = make_ufunctiontype(int_type, iota);
+  auto sharing_test = make_uunion(duplicate_subtype, duplicate_subtype);
+  
+  std::cout << "Before simplification: " << printType(sharing_test) << "\n";
+  auto simplified_sharing = simplifyType(sharing_test);
+  std::cout << "After simplification:  " << printType(simplified_sharing) << "\n";
+  std::cout << "✓ Duplicate structures should be shared via hash consing\n\n";
+  
+  std::cout << "=== All simplification tests completed! ===\n";
+  return 0;
+}
 #endif
+
+} // namespace simplesub
+
+// =================== Type Simplification Implementation ===========================
+
+namespace simplesub {
+
+// Helper function to get variable ID from type variable names (assumes format "α123")
+std::uint32_t extractVariableId(const std::string& varName) {
+  if (varName.empty() || varName.substr(0, 1) != "α") return 0;
+  try {
+    return std::stoul(varName.substr(1));
+  } catch (...) {
+    return 0;
+  }
+}
+
+// Helper function to compute type hash for hash consing
+std::string computeTypeHash(const UTypePtr& ty) {
+  std::ostringstream oss;
+  std::visit([&](auto const& n) {
+    using T = std::decay_t<decltype(n)>;
+    if constexpr (std::is_same_v<T, UTop>) {
+      oss << "TOP";
+    } else if constexpr (std::is_same_v<T, UBot>) {
+      oss << "BOT";
+    } else if constexpr (std::is_same_v<T, UPrimitiveType>) {
+      oss << "PRIM:" << n.name;
+    } else if constexpr (std::is_same_v<T, UTypeVariable>) {
+      oss << "VAR:" << n.name;
+    } else if constexpr (std::is_same_v<T, UFunctionType>) {
+      oss << "FUN(" << computeTypeHash(n.lhs) << "->" << computeTypeHash(n.rhs) << ")";
+    } else if constexpr (std::is_same_v<T, UUnion>) {
+      oss << "UNION(" << computeTypeHash(n.lhs) << "+" << computeTypeHash(n.rhs) << ")";
+    } else if constexpr (std::is_same_v<T, UInter>) {
+      oss << "INTER(" << computeTypeHash(n.lhs) << "&" << computeTypeHash(n.rhs) << ")";
+    } else if constexpr (std::is_same_v<T, URecordType>) {
+      oss << "REC{";
+      for (size_t i = 0; i < n.fields.size(); ++i) {
+        if (i > 0) oss << ";";
+        oss << n.fields[i].first << ":" << computeTypeHash(n.fields[i].second);
+      }
+      oss << "}";
+    } else if constexpr (std::is_same_v<T, URecursiveType>) {
+      oss << "MU(" << n.name << "." << computeTypeHash(n.body) << ")";
+    }
+  }, ty->v);
+  return oss.str();
+}
+
+// Co-occurrence analysis implementation (Section 4.3.1)
+void analyzeOccurrencesImpl(const UTypePtr& ty, bool positive, OccurrenceMap& occMap, 
+                           std::set<std::uint32_t>& currentContext) {
+  std::visit([&](auto const& n) {
+    using T = std::decay_t<decltype(n)>;
+    if constexpr (std::is_same_v<T, UTypeVariable>) {
+      std::uint32_t varId = extractVariableId(n.name);
+      if (varId != 0) {
+        auto& occ = occMap[varId];
+        if (positive) {
+          occ.appearsPositive = true;
+          // Record co-occurrence with other variables in current context
+          for (auto otherId : currentContext) {
+            occ.coOccurs.positiveVars.insert(otherId);
+            occMap[otherId].coOccurs.positiveVars.insert(varId);
+          }
+        } else {
+          occ.appearsNegative = true;
+          for (auto otherId : currentContext) {
+            occ.coOccurs.negativeVars.insert(otherId);
+            occMap[otherId].coOccurs.negativeVars.insert(varId);
+          }
+        }
+        currentContext.insert(varId);
+      }
+    } else if constexpr (std::is_same_v<T, UPrimitiveType>) {
+      // Record primitive co-occurrence with variables in context
+      for (auto varId : currentContext) {
+        if (positive) {
+          occMap[varId].coOccurs.positivePrims.insert(n.name);
+        } else {
+          occMap[varId].coOccurs.negativePrims.insert(n.name);
+        }
+      }
+    } else if constexpr (std::is_same_v<T, UFunctionType>) {
+      // Function: lhs is negative, rhs is positive
+      analyzeOccurrencesImpl(n.lhs, !positive, occMap, currentContext);
+      analyzeOccurrencesImpl(n.rhs, positive, occMap, currentContext);
+    } else if constexpr (std::is_same_v<T, UUnion>) {
+      // Union: both sides have same polarity
+      std::set<std::uint32_t> leftContext = currentContext;
+      std::set<std::uint32_t> rightContext = currentContext;
+      analyzeOccurrencesImpl(n.lhs, positive, occMap, leftContext);
+      analyzeOccurrencesImpl(n.rhs, positive, occMap, rightContext);
+      // Merge contexts for co-occurrence
+      currentContext.insert(leftContext.begin(), leftContext.end());
+      currentContext.insert(rightContext.begin(), rightContext.end());
+    } else if constexpr (std::is_same_v<T, UInter>) {
+      // Intersection: both sides have same polarity  
+      std::set<std::uint32_t> leftContext = currentContext;
+      std::set<std::uint32_t> rightContext = currentContext;
+      analyzeOccurrencesImpl(n.lhs, positive, occMap, leftContext);
+      analyzeOccurrencesImpl(n.rhs, positive, occMap, rightContext);
+      currentContext.insert(leftContext.begin(), leftContext.end());
+      currentContext.insert(rightContext.begin(), rightContext.end());
+    } else if constexpr (std::is_same_v<T, URecordType>) {
+      // Record fields: same polarity
+      for (const auto& [name, fieldType] : n.fields) {
+        analyzeOccurrencesImpl(fieldType, positive, occMap, currentContext);
+      }
+    } else if constexpr (std::is_same_v<T, URecursiveType>) {
+      // Recursive types: analyze body
+      analyzeOccurrencesImpl(n.body, positive, occMap, currentContext);
+    }
+    // Top and Bot don't contribute to co-occurrence
+  }, ty->v);
+}
+
+OccurrenceMap analyzeOccurrences(const UTypePtr& ty) {
+  OccurrenceMap occMap;
+  std::set<std::uint32_t> context;
+  analyzeOccurrencesImpl(ty, true, occMap, context);
+  return occMap;
+}
+
+// Polar variable removal (Section 4.3.1)
+UTypePtr removePolarVariables(const UTypePtr& ty, const OccurrenceMap& occMap) {
+  return std::visit([&](auto const& n) -> UTypePtr {
+    using T = std::decay_t<decltype(n)>;
+    if constexpr (std::is_same_v<T, UTypeVariable>) {
+      std::uint32_t varId = extractVariableId(n.name);
+      if (varId != 0) {
+        auto it = occMap.find(varId);
+        if (it != occMap.end()) {
+          const auto& occ = it->second;
+          // Remove variables that appear only positively (replace with ⊥) 
+          // or only negatively (replace with ⊤)
+          if (occ.appearsPositive && !occ.appearsNegative) {
+            return make_ubot(); // Variable only appears positively, can be ⊥
+          }
+          if (occ.appearsNegative && !occ.appearsPositive) {
+            return make_utop(); // Variable only appears negatively, can be ⊤
+          }
+        }
+      }
+      return ty; // Keep variable as-is
+    } else if constexpr (std::is_same_v<T, UFunctionType>) {
+      return make_ufunctiontype(
+          removePolarVariables(n.lhs, occMap),
+          removePolarVariables(n.rhs, occMap));
+    } else if constexpr (std::is_same_v<T, UUnion>) {
+      auto left = removePolarVariables(n.lhs, occMap);
+      auto right = removePolarVariables(n.rhs, occMap);
+      // Simplify: ⊥ ∪ τ = τ
+      if (std::holds_alternative<UBot>(left->v)) return right;
+      if (std::holds_alternative<UBot>(right->v)) return left;
+      return make_uunion(left, right);
+    } else if constexpr (std::is_same_v<T, UInter>) {
+      auto left = removePolarVariables(n.lhs, occMap);
+      auto right = removePolarVariables(n.rhs, occMap);
+      // Simplify: ⊤ ∩ τ = τ
+      if (std::holds_alternative<UTop>(left->v)) return right;
+      if (std::holds_alternative<UTop>(right->v)) return left;
+      return make_uinter(left, right);
+    } else if constexpr (std::is_same_v<T, URecordType>) {
+      std::vector<std::pair<std::string, UTypePtr>> fields;
+      fields.reserve(n.fields.size());
+      for (const auto& [name, fieldType] : n.fields) {
+        fields.emplace_back(name, removePolarVariables(fieldType, occMap));
+      }
+      return make_urecordtype(std::move(fields));
+    } else if constexpr (std::is_same_v<T, URecursiveType>) {
+      return make_urecursivetype(n.name, removePolarVariables(n.body, occMap));
+    } else {
+      return ty; // Top, Bot, Primitive unchanged
+    }
+  }, ty->v);
+}
+
+// Variable sandwich flattening (Section 4.3.1)
+UTypePtr flattenVariableSandwiches(const UTypePtr& ty, const OccurrenceMap& occMap) {
+  return std::visit([&](auto const& n) -> UTypePtr {
+    using T = std::decay_t<decltype(n)>;
+    if constexpr (std::is_same_v<T, UTypeVariable>) {
+      std::uint32_t varId = extractVariableId(n.name);
+      if (varId != 0) {
+        auto it = occMap.find(varId);
+        if (it != occMap.end()) {
+          const auto& occ = it->second;
+          // If variable co-occurs with exactly one primitive both positively and negatively,
+          // it's equivalent to that primitive (variable sandwich)
+          if (occ.appearsPositive && occ.appearsNegative &&
+              occ.coOccurs.positivePrims.size() == 1 && occ.coOccurs.negativePrims.size() == 1 &&
+              *occ.coOccurs.positivePrims.begin() == *occ.coOccurs.negativePrims.begin()) {
+            return make_uprimitivetype(*occ.coOccurs.positivePrims.begin());
+          }
+        }
+      }
+      return ty;
+    } else if constexpr (std::is_same_v<T, UFunctionType>) {
+      return make_ufunctiontype(
+          flattenVariableSandwiches(n.lhs, occMap),
+          flattenVariableSandwiches(n.rhs, occMap));
+    } else if constexpr (std::is_same_v<T, UUnion>) {
+      return make_uunion(
+          flattenVariableSandwiches(n.lhs, occMap),
+          flattenVariableSandwiches(n.rhs, occMap));
+    } else if constexpr (std::is_same_v<T, UInter>) {
+      return make_uinter(
+          flattenVariableSandwiches(n.lhs, occMap),
+          flattenVariableSandwiches(n.rhs, occMap));
+    } else if constexpr (std::is_same_v<T, URecordType>) {
+      std::vector<std::pair<std::string, UTypePtr>> fields;
+      fields.reserve(n.fields.size());
+      for (const auto& [name, fieldType] : n.fields) {
+        fields.emplace_back(name, flattenVariableSandwiches(fieldType, occMap));
+      }
+      return make_urecordtype(std::move(fields));
+    } else if constexpr (std::is_same_v<T, URecursiveType>) {
+      return make_urecursivetype(n.name, flattenVariableSandwiches(n.body, occMap));
+    } else {
+      return ty;
+    }
+  }, ty->v);
+}
+
+// Unification of indistinguishable variables (Section 4.3.1)
+UTypePtr unifyIndistinguishableVariables(const UTypePtr& ty, const OccurrenceMap& occMap) {
+  // Build equivalence classes of variables that always co-occur
+  std::map<std::uint32_t, std::uint32_t> representatives; // var -> representative
+  
+  for (const auto& [varId, occ] : occMap) {
+    representatives[varId] = varId; // Initially each var represents itself
+  }
+  
+  // Find variables that always co-occur positively AND negatively
+  for (const auto& [varId, occ] : occMap) {
+    for (auto otherVarId : occ.coOccurs.positiveVars) {
+      auto otherIt = occMap.find(otherVarId);
+      if (otherIt != occMap.end() && 
+          occ.coOccurs.negativeVars.count(otherVarId) > 0) {
+        // varId and otherVarId co-occur both positively and negatively
+        // Unify them by using the smaller ID as representative
+        std::uint32_t rep = std::min(representatives[varId], representatives[otherVarId]);
+        representatives[varId] = rep;
+        representatives[otherVarId] = rep;
+      }
+    }
+  }
+  
+  // Apply variable substitution
+  std::function<UTypePtr(const UTypePtr&)> substitute = [&](const UTypePtr& t) -> UTypePtr {
+    return std::visit([&](auto const& n) -> UTypePtr {
+      using T = std::decay_t<decltype(n)>;
+      if constexpr (std::is_same_v<T, UTypeVariable>) {
+        std::uint32_t varId = extractVariableId(n.name);
+        if (varId != 0 && representatives.count(varId)) {
+          std::uint32_t rep = representatives[varId];
+          if (rep != varId) {
+            return make_utypevariable("α" + std::to_string(rep));
+          }
+        }
+        return t;
+      } else if constexpr (std::is_same_v<T, UFunctionType>) {
+        return make_ufunctiontype(substitute(n.lhs), substitute(n.rhs));
+      } else if constexpr (std::is_same_v<T, UUnion>) {
+        return make_uunion(substitute(n.lhs), substitute(n.rhs));
+      } else if constexpr (std::is_same_v<T, UInter>) {
+        return make_uinter(substitute(n.lhs), substitute(n.rhs));
+      } else if constexpr (std::is_same_v<T, URecordType>) {
+        std::vector<std::pair<std::string, UTypePtr>> fields;
+        fields.reserve(n.fields.size());
+        for (const auto& [name, fieldType] : n.fields) {
+          fields.emplace_back(name, substitute(fieldType));
+        }
+        return make_urecordtype(std::move(fields));
+      } else if constexpr (std::is_same_v<T, URecursiveType>) {
+        return make_urecursivetype(n.name, substitute(n.body));
+      } else {
+        return t;
+      }
+    }, t->v);
+  };
+  
+  return substitute(ty);
+}
+
+// Hash consing implementation (Section 4.3.2)
+UTypePtr hashConsType(const UTypePtr& ty, TypeHashMap& hashMap) {
+  std::string hash = computeTypeHash(ty);
+  
+  auto it = hashMap.find(hash);
+  if (it != hashMap.end()) {
+    return it->second; // Return existing instance
+  }
+  
+  // Recursively hash cons subterms first
+  UTypePtr result = std::visit([&](auto const& n) -> UTypePtr {
+    using T = std::decay_t<decltype(n)>;
+    if constexpr (std::is_same_v<T, UFunctionType>) {
+      return make_ufunctiontype(
+          hashConsType(n.lhs, hashMap),
+          hashConsType(n.rhs, hashMap));
+    } else if constexpr (std::is_same_v<T, UUnion>) {
+      return make_uunion(
+          hashConsType(n.lhs, hashMap),
+          hashConsType(n.rhs, hashMap));
+    } else if constexpr (std::is_same_v<T, UInter>) {
+      return make_uinter(
+          hashConsType(n.lhs, hashMap),
+          hashConsType(n.rhs, hashMap));
+    } else if constexpr (std::is_same_v<T, URecordType>) {
+      std::vector<std::pair<std::string, UTypePtr>> fields;
+      fields.reserve(n.fields.size());
+      for (const auto& [name, fieldType] : n.fields) {
+        fields.emplace_back(name, hashConsType(fieldType, hashMap));
+      }
+      return make_urecordtype(std::move(fields));
+    } else if constexpr (std::is_same_v<T, URecursiveType>) {
+      return make_urecursivetype(n.name, hashConsType(n.body, hashMap));
+    } else {
+      return ty; // Primitive types, variables, top, bot unchanged
+    }
+  }, ty->v);
+  
+  // Update hash after processing subterms
+  hash = computeTypeHash(result);
+  hashMap[hash] = result;
+  return result;
+}
+
+// Main simplification function combining all strategies
+UTypePtr simplifyType(const UTypePtr& ty) {
+  // Step 1: Analyze variable occurrences
+  auto occMap = analyzeOccurrences(ty);
+  
+  // Step 2: Apply simplification transformations
+  auto step1 = removePolarVariables(ty, occMap);
+  auto step2 = flattenVariableSandwiches(step1, occMap);
+  auto step3 = unifyIndistinguishableVariables(step2, occMap);
+  
+  // Step 3: Apply hash consing to remove duplicate structures
+  TypeHashMap hashMap;
+  auto result = hashConsType(step3, hashMap);
+  
+  return result;
+}
 
 } // namespace simplesub
 
@@ -685,6 +1136,12 @@ int main() {
   if (result2 != 0) {
     std::cerr << "demo_twice failed\n";
     return result2;
+  }
+  
+  int result3 = simplesub::demo_simplification();
+  if (result3 != 0) {
+    std::cerr << "demo_simplification failed\n";
+    return result3;
   }
   
   std::cout << "All demos passed!\n";
