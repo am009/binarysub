@@ -311,6 +311,12 @@ UTypePtr simplifyType(const UTypePtr& ty);
 CompactTypeScheme compactType(const SimpleType& st);
 UTypePtr coalesceCompactType(const CompactTypeScheme& scheme);
 
+// CompactType helper functions
+std::shared_ptr<CompactType> make_empty_compact_type();
+std::shared_ptr<CompactType> merge_compact_types(bool pol, 
+    const std::shared_ptr<CompactType>& lhs, 
+    const std::shared_ptr<CompactType>& rhs);
+
 // Analysis functions  
 OccurrenceMap analyzeOccurrences(const UTypePtr& ty);
 void analyzeOccurrencesImpl(const UTypePtr& ty, bool positive, OccurrenceMap& occMap, 

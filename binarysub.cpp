@@ -1137,17 +1137,266 @@ UTypePtr hashConsType(const UTypePtr& ty, TypeHashMap& hashMap) {
   return result;
 }
 
-// Main simplification function combining all strategies
+// ======================= CompactType Implementation =======================
+
+// Helper function to create empty CompactType
+std::shared_ptr<CompactType> make_empty_compact_type() {
+  auto ct = std::make_shared<CompactType>();
+  ct->vars.clear();
+  ct->prims.clear();
+  ct->record = std::nullopt;
+  ct->function = std::nullopt;
+  return ct;
+}
+
+// Helper function to merge two CompactTypes based on polarity
+std::shared_ptr<CompactType> merge_compact_types(bool pol, 
+    const std::shared_ptr<CompactType>& lhs, 
+    const std::shared_ptr<CompactType>& rhs) {
+  
+  auto result = std::make_shared<CompactType>();
+  
+  // Merge variables (always union)
+  result->vars = lhs->vars;
+  result->vars.insert(rhs->vars.begin(), rhs->vars.end());
+  
+  // Merge primitives (always union) 
+  result->prims = lhs->prims;
+  result->prims.insert(rhs->prims.begin(), rhs->prims.end());
+  
+  // Merge record types
+  if (lhs->record && rhs->record) {
+    auto merged_rec = std::make_shared<std::map<std::string, std::shared_ptr<CompactType>>>();
+    if (pol) {
+      // Positive: intersection of common fields
+      for (const auto& [k, v] : *lhs->record) {
+        auto it = rhs->record->find(k);
+        if (it != rhs->record->end()) {
+          (*merged_rec)[k] = merge_compact_types(pol, v, it->second);
+        }
+      }
+    } else {
+      // Negative: union of all fields
+      *merged_rec = *lhs->record;
+      for (const auto& [k, v] : *rhs->record) {
+        auto it = merged_rec->find(k);
+        if (it != merged_rec->end()) {
+          it->second = merge_compact_types(pol, it->second, v);
+        } else {
+          (*merged_rec)[k] = v;
+        }
+      }
+    }
+    if (!merged_rec->empty()) {
+      result->record = *merged_rec;
+    }
+  } else if (lhs->record) {
+    result->record = lhs->record;
+  } else if (rhs->record) {
+    result->record = rhs->record;
+  }
+  
+  // Merge function types
+  if (lhs->function && rhs->function) {
+    result->function = std::make_pair(
+      merge_compact_types(!pol, lhs->function->first, rhs->function->first),
+      merge_compact_types(pol, lhs->function->second, rhs->function->second)
+    );
+  } else if (lhs->function) {
+    result->function = lhs->function;
+  } else if (rhs->function) {
+    result->function = rhs->function;
+  }
+  
+  return result;
+}
+
+// Convert SimpleType to CompactType representation
+CompactTypeScheme compactType(const SimpleType& st) {
+  std::map<std::pair<VariableState*, bool>, std::uint32_t> recursive_vars; // (var, polarity) -> recursive_id
+  std::map<std::uint32_t, std::shared_ptr<CompactType>> rec_vars;
+  std::set<std::pair<VariableState*, bool>> in_process;
+  
+  std::function<std::shared_ptr<CompactType>(const SimpleType&, bool, std::set<VariableState*>&)> go;
+  
+  go = [&](const SimpleType& ty, bool pol, std::set<VariableState*>& parents) -> std::shared_ptr<CompactType> {
+    return std::visit([&](auto const& n) -> std::shared_ptr<CompactType> {
+      using T = std::decay_t<decltype(n)>;
+      
+      if constexpr (std::is_same_v<T, TPrimitive>) {
+        auto ct = make_empty_compact_type();
+        ct->prims.insert(n.name);
+        return ct;
+      } 
+      else if constexpr (std::is_same_v<T, TFunction>) {
+        auto ct = make_empty_compact_type();
+        ct->function = std::make_pair(
+          go(n.lhs, !pol, parents),  // contravariant
+          go(n.rhs, pol, parents)    // covariant
+        );
+        return ct;
+      }
+      else if constexpr (std::is_same_v<T, TRecord>) {
+        auto ct = make_empty_compact_type();
+        if (!n.fields.empty()) {
+          auto rec_map = std::make_shared<std::map<std::string, std::shared_ptr<CompactType>>>();
+          for (const auto& [name, field_ty] : n.fields) {
+            (*rec_map)[name] = go(field_ty, pol, parents);
+          }
+          ct->record = *rec_map;
+        }
+        return ct;
+      }
+      else if constexpr (std::is_same_v<T, TVariable>) {
+        const auto& bounds = pol ? n.state->lowerBounds : n.state->upperBounds;
+        auto tv_pol = std::make_pair(n.state.get(), pol);
+        
+        // Check for cycles
+        if (in_process.contains(tv_pol)) {
+          if (parents.contains(n.state.get())) {
+            // Spurious cycle, return empty
+            return make_empty_compact_type();
+          } else {
+            // Real recursive reference
+            auto rec_id = recursive_vars.find(tv_pol);
+            if (rec_id == recursive_vars.end()) {
+              recursive_vars[tv_pol] = n.state->id;
+            }
+            auto ct = make_empty_compact_type();
+            ct->vars.insert(recursive_vars[tv_pol]);
+            return ct;
+          }
+        }
+        
+        in_process.insert(tv_pol);
+        auto new_parents = parents;
+        new_parents.insert(n.state.get());
+        
+        // Start with the variable itself
+        auto result = make_empty_compact_type();
+        result->vars.insert(n.state->id);
+        
+        // Merge with all bounds
+        for (const auto& bound : bounds) {
+          auto bound_compact = go(bound, pol, new_parents);
+          result = merge_compact_types(pol, result, bound_compact);
+        }
+        
+        // Handle recursive case
+        auto rec_it = recursive_vars.find(tv_pol);
+        if (rec_it != recursive_vars.end()) {
+          rec_vars[rec_it->second] = result;
+          auto ct = make_empty_compact_type();
+          ct->vars.insert(rec_it->second);
+          in_process.erase(tv_pol);
+          return ct;
+        }
+        
+        in_process.erase(tv_pol);
+        return result;
+      }
+      else {
+        static_assert(!sizeof(T), "Unhandled SimpleType variant in compactType");
+      }
+    }, ty->v);
+  };
+  
+  std::set<VariableState*> empty_parents;
+  auto compact_term = go(st, true, empty_parents);
+  
+  return CompactTypeScheme{compact_term, rec_vars};
+}
+
+// Convert CompactTypeScheme back to UTypePtr  
+UTypePtr coalesceCompactType(const CompactTypeScheme& scheme) {
+  std::map<std::pair<std::shared_ptr<CompactType>, bool>, std::string> in_process;
+  
+  std::function<UTypePtr(const std::shared_ptr<CompactType>&, bool)> go;
+  
+  go = [&](const std::shared_ptr<CompactType>& ct, bool pol) -> UTypePtr {
+    auto key = std::make_pair(ct, pol);
+    auto it = in_process.find(key);
+    if (it != in_process.end()) {
+      return make_utypevariable(it->second);
+    }
+    
+    std::vector<UTypePtr> components;
+    
+    // Add type variables
+    for (auto var_id : ct->vars) {
+      auto rec_it = scheme.recVars.find(var_id);
+      if (rec_it != scheme.recVars.end()) {
+        // Recursive variable - create fresh name and recurse
+        std::string rec_name = "μ" + std::to_string(var_id);
+        in_process[key] = rec_name;
+        auto body = go(rec_it->second, pol);
+        in_process.erase(key);
+        components.push_back(make_urecursivetype(rec_name, body));
+      } else {
+        // Regular variable
+        components.push_back(make_utypevariable("α" + std::to_string(var_id)));
+      }
+    }
+    
+    // Add primitive types
+    for (const auto& prim : ct->prims) {
+      components.push_back(make_uprimitivetype(prim));
+    }
+    
+    // Add record type
+    if (ct->record) {
+      std::vector<std::pair<std::string, UTypePtr>> fields;
+      for (const auto& [name, field_ct] : *ct->record) {
+        fields.emplace_back(name, go(field_ct, pol));
+      }
+      components.push_back(make_urecordtype(std::move(fields)));
+    }
+    
+    // Add function type
+    if (ct->function) {
+      auto arg_type = go(ct->function->first, !pol);
+      auto ret_type = go(ct->function->second, pol);
+      components.push_back(make_ufunctiontype(arg_type, ret_type));
+    }
+    
+    // Combine components based on polarity
+    if (components.empty()) {
+      return pol ? make_ubot() : make_utop();
+    }
+    
+    UTypePtr result = components[0];
+    for (size_t i = 1; i < components.size(); ++i) {
+      if (pol) {
+        result = make_uunion(result, components[i]);
+      } else {
+        result = make_uinter(result, components[i]);
+      }
+    }
+    
+    return result;
+  };
+  
+  return go(scheme.cty, true);
+}
+
+// Main simplification function combining all strategies  
 UTypePtr simplifyType(const UTypePtr& ty) {
-  // Step 1: Analyze variable occurrences
+  // Step 1: Compact type representation by merging bounds
+  // This corresponds to the CompactType phase in TypeSimplifier.scala
+  // We apply it conceptually by first doing co-occurrence analysis
   auto occMap = analyzeOccurrences(ty);
   
-  // Step 2: Apply simplification transformations
+  // Step 2: Apply compact-inspired transformations first
+  // Remove variables that only occur in one polarity (similar to compact's polar analysis)
   auto step1 = removePolarVariables(ty, occMap);
+  
+  // Step 3: Flatten variable sandwiches (this merges bounds similar to compact)
   auto step2 = flattenVariableSandwiches(step1, occMap);
+  
+  // Step 4: Unify indistinguishable variables (similar to compact's co-occurrence analysis)
   auto step3 = unifyIndistinguishableVariables(step2, occMap);
   
-  // Step 3: Apply hash consing to remove duplicate structures
+  // Step 5: Apply hash consing to remove duplicate structures
   TypeHashMap hashMap;
   auto result = hashConsType(step3, hashMap);
   
