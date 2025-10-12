@@ -200,6 +200,79 @@ expected<void, Error> constrain_impl(const SimpleType &lhs,
                                     Cache &cache,
                                     VarSupply &supply);
 
+// ======================= User-facing algebraic types ========================
+
+struct UTop {};
+struct UBot {};
+struct UTypeVariable {
+  std::string name;
+};
+struct UPrimitiveType {
+  std::string name;
+};
+
+struct UType;
+using UTypePtr = std::shared_ptr<UType>;
+
+struct UUnion {
+  UTypePtr lhs, rhs;
+};
+struct UInter {
+  UTypePtr lhs, rhs;
+};
+struct UFunctionType {
+  UTypePtr lhs, rhs;
+};
+struct URecordType {
+  std::vector<std::pair<std::string, UTypePtr>> fields;
+};
+struct URecursiveType {
+  std::string name;
+  UTypePtr body;
+};
+
+struct UType {
+  std::variant<UTop, UBot, UUnion, UInter, UFunctionType, URecordType, 
+               URecursiveType, UTypeVariable, UPrimitiveType> v;
+  
+  explicit UType(UTop t) : v(std::move(t)) {}
+  explicit UType(UBot b) : v(std::move(b)) {}
+  explicit UType(UUnion u) : v(std::move(u)) {}
+  explicit UType(UInter i) : v(std::move(i)) {}
+  explicit UType(UFunctionType f) : v(std::move(f)) {}
+  explicit UType(URecordType r) : v(std::move(r)) {}
+  explicit UType(URecursiveType rt) : v(std::move(rt)) {}
+  explicit UType(UTypeVariable tv) : v(std::move(tv)) {}
+  explicit UType(UPrimitiveType pt) : v(std::move(pt)) {}
+};
+
+// Helper functions to create UType instances
+UTypePtr make_utop();
+UTypePtr make_ubot();
+UTypePtr make_uunion(UTypePtr lhs, UTypePtr rhs);
+UTypePtr make_uinter(UTypePtr lhs, UTypePtr rhs);
+UTypePtr make_ufunctiontype(UTypePtr lhs, UTypePtr rhs);
+UTypePtr make_urecordtype(std::vector<std::pair<std::string, UTypePtr>> fields);
+UTypePtr make_urecursivetype(std::string name, UTypePtr body);
+UTypePtr make_utypevariable(std::string name);
+UTypePtr make_uprimitivetype(std::string name);
+
+// Type coalescing
+struct PolarVar {
+  VariableState* vs;
+  bool polar;  // true = positive, false = negative
+  bool operator<(const PolarVar& other) const;
+};
+
+UTypePtr coalesceType(const SimpleType& st);
+UTypePtr coalesceTypeImpl(const SimpleType& st, bool polar, 
+                         std::set<PolarVar>& inProcess,
+                         std::map<PolarVar, std::string>& recursive);
+
+// Pretty printing  
+std::string printType(const UTypePtr& ty);
+void printTypeImpl(const UTypePtr& ty, std::ostream& os, int precedence = 0);
+
 // ============= Type schemes (let-polymorphism without AST) =================
 struct MonoScheme {
   SimpleType body;

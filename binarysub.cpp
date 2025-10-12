@@ -1,4 +1,5 @@
 #include "binarysub.h"
+#include <sstream>
 
 namespace simplesub {
 
@@ -125,7 +126,7 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
   if (level_of(ty) <= lvl)
     return ty;
 
-  if (auto p = ty->getAsTPrimitive())
+  if (auto p [[maybe_unused]] = ty->getAsTPrimitive())
     return ty;
 
   if (auto f = ty->getAsTFunction()) {
@@ -183,7 +184,7 @@ expected<void, Error> constrain(const SimpleType &lhs,
                                const SimpleType &rhs, Cache &cache,
                                VarSupply &supply) {
   auto key = std::make_pair(lhs.get(), rhs.get());
-  if (cache.contains(key))
+  if (cache.find(key) != cache.end())
     return expected<void, Error>{};
   cache.insert(key);
   return constrain_impl(lhs, rhs, cache, supply);
@@ -262,8 +263,204 @@ expected<void, Error> constrain_impl(const SimpleType &lhs,
 }
 
 // ======================= User-facing algebraic types & coalescing =========
-// (unchanged from previous version, omitted here for brevity in this excerpt)
-// -- keep your existing UType, coalesceType, printU implementation --
+
+// Helper functions to create UType instances
+UTypePtr make_utop() {
+  return std::make_shared<UType>(UTop{});
+}
+
+UTypePtr make_ubot() {
+  return std::make_shared<UType>(UBot{});
+}
+
+UTypePtr make_uunion(UTypePtr lhs, UTypePtr rhs) {
+  return std::make_shared<UType>(UUnion{std::move(lhs), std::move(rhs)});
+}
+
+UTypePtr make_uinter(UTypePtr lhs, UTypePtr rhs) {
+  return std::make_shared<UType>(UInter{std::move(lhs), std::move(rhs)});
+}
+
+UTypePtr make_ufunctiontype(UTypePtr lhs, UTypePtr rhs) {
+  return std::make_shared<UType>(UFunctionType{std::move(lhs), std::move(rhs)});
+}
+
+UTypePtr make_urecordtype(std::vector<std::pair<std::string, UTypePtr>> fields) {
+  return std::make_shared<UType>(URecordType{std::move(fields)});
+}
+
+UTypePtr make_urecursivetype(std::string name, UTypePtr body) {
+  return std::make_shared<UType>(URecursiveType{std::move(name), std::move(body)});
+}
+
+UTypePtr make_utypevariable(std::string name) {
+  return std::make_shared<UType>(UTypeVariable{std::move(name)});
+}
+
+UTypePtr make_uprimitivetype(std::string name) {
+  return std::make_shared<UType>(UPrimitiveType{std::move(name)});
+}
+
+// PolarVar implementation
+bool PolarVar::operator<(const PolarVar& other) const {
+  if (vs != other.vs)
+    return vs < other.vs;
+  return polar < other.polar;
+}
+
+// Generate unique variable names
+static std::uint32_t var_name_counter = 0;
+std::string fresh_var_name() {
+  return "α" + std::to_string(var_name_counter++);
+}
+
+// Type coalescing implementation based on paper Section 3.3.3
+UTypePtr coalesceType(const SimpleType& st) {
+  std::set<PolarVar> inProcess;
+  std::map<PolarVar, std::string> recursive;
+  return coalesceTypeImpl(st, true, inProcess, recursive);
+}
+
+UTypePtr coalesceTypeImpl(const SimpleType& st, bool polar, 
+                         std::set<PolarVar>& inProcess,
+                         std::map<PolarVar, std::string>& recursive) {
+  return std::visit(
+      [&](auto const &n) -> UTypePtr {
+        using T = std::decay_t<decltype(n)>;
+        if constexpr (isTPrimitiveType<T>()) {
+          return make_uprimitivetype(n.name);
+        } else if constexpr (isTFunctionType<T>()) {
+          auto l = coalesceTypeImpl(n.lhs, !polar, inProcess, recursive);
+          auto r = coalesceTypeImpl(n.rhs, polar, inProcess, recursive);
+          return make_ufunctiontype(std::move(l), std::move(r));
+        } else if constexpr (isTRecordType<T>()) {
+          std::vector<std::pair<std::string, UTypePtr>> fields;
+          fields.reserve(n.fields.size());
+          for (auto const& [name, ty] : n.fields) {
+            fields.emplace_back(name, coalesceTypeImpl(ty, polar, inProcess, recursive));
+          }
+          return make_urecordtype(std::move(fields));
+        } else if constexpr (isTVariableType<T>()) {
+          PolarVar pv{n.state.get(), polar};
+          
+          // Check if we're already processing this variable (recursion detection)
+          if (inProcess.find(pv) != inProcess.end()) {
+            auto it = recursive.find(pv);
+            if (it != recursive.end()) {
+              return make_utypevariable(it->second);
+            } else {
+              std::string varName = fresh_var_name();
+              recursive[pv] = varName;
+              return make_utypevariable(varName);
+            }
+          }
+          
+          inProcess.insert(pv);
+          
+          // Get the appropriate bounds based on polarity
+          const auto& bounds = polar ? n.state->lowerBounds : n.state->upperBounds;
+          
+          if (bounds.empty()) {
+            // No bounds, return the variable itself
+            std::string varName = "α" + std::to_string(n.state->id);
+            inProcess.erase(pv);
+            return make_utypevariable(varName);
+          }
+          
+          // Convert bounds to user types
+          std::vector<UTypePtr> boundTypes;
+          boundTypes.reserve(bounds.size());
+          for (const auto& bound : bounds) {
+            boundTypes.push_back(coalesceTypeImpl(bound, polar, inProcess, recursive));
+          }
+          
+          // Combine bounds with union (for positive) or intersection (for negative)
+          UTypePtr result;
+          if (polar) {
+            // Positive: union of lower bounds
+            result = boundTypes[0];
+            for (size_t i = 1; i < boundTypes.size(); ++i) {
+              result = make_uunion(result, boundTypes[i]);
+            }
+          } else {
+            // Negative: intersection of upper bounds
+            result = boundTypes[0];
+            for (size_t i = 1; i < boundTypes.size(); ++i) {
+              result = make_uinter(result, boundTypes[i]);
+            }
+          }
+          
+          inProcess.erase(pv);
+          
+          // Check if this was a recursive variable
+          auto it = recursive.find(pv);
+          if (it != recursive.end()) {
+            return make_urecursivetype(it->second, result);
+          }
+          
+          return result;
+        } else {
+          static_assert(!sizeof(T), "Unhandled variant type in coalesceTypeImpl");
+        }
+      },
+      st->v);
+}
+
+// Pretty printing implementation
+std::string printType(const UTypePtr& ty) {
+  std::ostringstream oss;
+  printTypeImpl(ty, oss, 0);
+  return oss.str();
+}
+
+void printTypeImpl(const UTypePtr& ty, std::ostream& os, int precedence) {
+  std::visit([&](auto const& n) {
+    using T = std::decay_t<decltype(n)>;
+    if constexpr (std::is_same_v<T, UTop>) {
+      os << "⊤";
+    } else if constexpr (std::is_same_v<T, UBot>) {
+      os << "⊥";
+    } else if constexpr (std::is_same_v<T, UPrimitiveType>) {
+      os << n.name;
+    } else if constexpr (std::is_same_v<T, UTypeVariable>) {
+      os << n.name;
+    } else if constexpr (std::is_same_v<T, UFunctionType>) {
+      bool needParens = precedence > 1;
+      if (needParens) os << "(";
+      printTypeImpl(n.lhs, os, 2);
+      os << " → ";
+      printTypeImpl(n.rhs, os, 1);
+      if (needParens) os << ")";
+    } else if constexpr (std::is_same_v<T, UUnion>) {
+      bool needParens = precedence > 3;
+      if (needParens) os << "(";
+      printTypeImpl(n.lhs, os, 4);
+      os << " ∪ ";
+      printTypeImpl(n.rhs, os, 3);
+      if (needParens) os << ")";
+    } else if constexpr (std::is_same_v<T, UInter>) {
+      bool needParens = precedence > 4;
+      if (needParens) os << "(";
+      printTypeImpl(n.lhs, os, 5);
+      os << " ∩ ";
+      printTypeImpl(n.rhs, os, 4);
+      if (needParens) os << ")";
+    } else if constexpr (std::is_same_v<T, URecordType>) {
+      os << "{";
+      for (size_t i = 0; i < n.fields.size(); ++i) {
+        if (i > 0) os << "; ";
+        os << n.fields[i].first << ": ";
+        printTypeImpl(n.fields[i].second, os, 0);
+      }
+      os << "}";
+    } else if constexpr (std::is_same_v<T, URecursiveType>) {
+      os << "μ" << n.name << ".";
+      printTypeImpl(n.body, os, 0);
+    } else {
+      static_assert(!sizeof(T), "Unhandled UType variant in printTypeImpl");
+    }
+  }, ty->v);
+}
 
 // ============= Type schemes implementation =================
 SimpleType freshen_above_rec(const SimpleType &t, int cutoff,
@@ -386,7 +583,12 @@ int demo_twice() {
   auto delta = fresh_variable(supply, 0);     // final result
   
   std::cout << "=== Testing twice function type inference ===\n";
-  std::cout << "twice = λf. λx. f(f x)\n";
+  std::cout << "twice = λf. λx. f(f x)\n\n";
+  
+  // Build the twice function type structure: α → β → δ
+  auto twice_type = make_function(alpha, make_function(beta, delta));
+  
+  std::cout << "Initial structure: " << printType(coalesceType(twice_type)) << "\n\n";
   
   // Step 1: Analyze inner application f x
   // For f x to be valid: f must be a function (β → γ)
@@ -397,6 +599,10 @@ int demo_twice() {
     return 1;
   }
   std::cout << "✓ Constrained f type for inner application f x\n";
+  std::cout << "  α <: β → γ  (f must accept x and return some γ)\n";
+  
+  // Show current twice type after first constraint
+  std::cout << "  Current twice type: " << printType(coalesceType(twice_type)) << "\n\n";
   
   // Step 2: Analyze outer application f (f x)  
   // For f (f x) to be valid: f must be a function (γ → δ)
@@ -407,6 +613,10 @@ int demo_twice() {
     return 1;
   }
   std::cout << "✓ Constrained f type for outer application f(f x)\n";
+  std::cout << "  α <: γ → δ  (f must accept γ and return final result δ)\n";
+  
+  // Show final twice type after all constraints
+  std::cout << "  Final twice type: " << printType(coalesceType(twice_type)) << "\n\n";
   
   // At this point, α has two upper bounds: (β → γ) and (γ → δ)
   // Check that the variables are properly constrained
@@ -418,8 +628,16 @@ int demo_twice() {
   
   std::cout << "✓ Alpha has " << alpha_var->state->upperBounds.size() << " upper bounds as expected\n";
   
+  // Show individual variable types
+  std::cout << "\nVariable constraint analysis:\n";
+  std::cout << "  α (f type): " << printType(coalesceType(alpha)) << "\n";
+  std::cout << "  β (x type): " << printType(coalesceType(beta)) << "\n";
+  std::cout << "  γ (intermediate): " << printType(coalesceType(gamma)) << "\n";
+  std::cout << "  δ (result): " << printType(coalesceType(delta)) << "\n\n";
+  
   // Test type soundness with concrete types
   // If we apply twice to a function int → int, everything should work
+  std::cout << "=== Testing with concrete int → int function ===\n";
   auto int_type = make_primitive("int");
   auto int_to_int = make_function(int_type, int_type);
   
@@ -444,9 +662,11 @@ int demo_twice() {
   }
   
   std::cout << "✓ Successfully applied twice to int → int function\n";
+  std::cout << "  When f: int → int and x: int\n";
+  std::cout << "  Result twice type: " << printType(coalesceType(twice_type)) << "\n";
   std::cout << "✓ Result type is correctly int\n";
   
-  std::cout << "=== All twice function tests passed! ===\n";
+  std::cout << "\n=== All twice function tests passed! ===\n";
   return 0;
 }
 #endif
