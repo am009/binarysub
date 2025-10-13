@@ -317,6 +317,9 @@ std::string toString(const CompactType &ct);
 using OccurrenceMap = std::map<PolarVar, std::set<SimpleType>>;
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &ty);
 
+// Coalesce SimpleType to UType for display purposes
+UTypePtr coalesceType(const SimpleType& st);
+
 // Simplification functions
 CompactTypeScheme compactType(const SimpleType &st);
 CompactTypeScheme canonicalizeType(const SimpleType &st);
@@ -347,13 +350,6 @@ SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
 SimpleType instantiate(const TypeScheme &sch, int at_level, VarSupply &supply);
 
 TypeScheme generalize(const SimpleType &rhs, int env_level);
-
-// ======================= Demo function =======================
-#ifdef SIMPLESUB_DEMO
-int demo_levels();
-int demo_twice();
-int demo_simplification(); // New simplification tests
-#endif
 
 } // namespace simplesub
 
