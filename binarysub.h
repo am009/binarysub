@@ -171,6 +171,7 @@ struct Error {
   std::string msg;
   static Error make(std::string m);
 };
+inline Error Error::make(std::string m) { return {std::move(m)}; }
 
 using Cache = std::set<std::pair<const TypeNode *, const TypeNode *>>;
 
@@ -178,7 +179,11 @@ using Cache = std::set<std::pair<const TypeNode *, const TypeNode *>>;
 struct PolarVar {
   VariableState *vs;
   bool pos;
-  bool operator<(const PolarVar &other) const;
+  bool operator<(const PolarVar &other) const {
+    if (vs != other.vs)
+      return vs < other.vs;
+    return pos < other.pos;
+  }
 };
 
 SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
@@ -241,21 +246,39 @@ struct UType {
 };
 
 // Helper functions to create UType instances
-UTypePtr make_utop();
-UTypePtr make_ubot();
-UTypePtr make_uunion(UTypePtr lhs, UTypePtr rhs);
-UTypePtr make_uinter(UTypePtr lhs, UTypePtr rhs);
-UTypePtr make_ufunctiontype(UTypePtr lhs, UTypePtr rhs);
-UTypePtr make_urecordtype(std::vector<std::pair<std::string, UTypePtr>> fields);
-UTypePtr make_urecursivetype(std::string name, UTypePtr body);
-UTypePtr make_utypevariable(std::string name);
-UTypePtr make_uprimitivetype(std::string name);
+inline UTypePtr make_utop() { return std::make_shared<UType>(UTop{}); }
 
-// TODO remove
-// UTypePtr coalesceType(const SimpleType &st);
-// UTypePtr coalesceTypeImpl(const SimpleType &st, bool polar,
-//                           std::set<PolarVS> &inProcess,
-//                           std::map<PolarVS, std::string> &recursive);
+inline UTypePtr make_ubot() { return std::make_shared<UType>(UBot{}); }
+
+inline UTypePtr make_uunion(UTypePtr lhs, UTypePtr rhs) {
+  return std::make_shared<UType>(UUnion{std::move(lhs), std::move(rhs)});
+}
+
+inline UTypePtr make_uinter(UTypePtr lhs, UTypePtr rhs) {
+  return std::make_shared<UType>(UInter{std::move(lhs), std::move(rhs)});
+}
+
+inline UTypePtr make_ufunctiontype(UTypePtr lhs, UTypePtr rhs) {
+  return std::make_shared<UType>(UFunctionType{std::move(lhs), std::move(rhs)});
+}
+
+inline UTypePtr
+make_urecordtype(std::vector<std::pair<std::string, UTypePtr>> fields) {
+  return std::make_shared<UType>(URecordType{std::move(fields)});
+}
+
+inline UTypePtr make_urecursivetype(std::string name, UTypePtr body) {
+  return std::make_shared<UType>(
+      URecursiveType{std::move(name), std::move(body)});
+}
+
+inline UTypePtr make_utypevariable(std::string name) {
+  return std::make_shared<UType>(UTypeVariable{std::move(name)});
+}
+
+inline UTypePtr make_uprimitivetype(std::string name) {
+  return std::make_shared<UType>(UPrimitiveType{std::move(name)});
+}
 
 // Pretty printing
 std::string printType(const UTypePtr &ty);
@@ -265,8 +288,8 @@ void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence = 0);
 
 // Intermediate representation for simplification (Section 4.4)
 struct CompactType {
-  std::set<SimpleType> vars; // type variables
-  std::set<SimpleType> prims;  // primitive types
+  std::set<SimpleType> vars;  // type variables
+  std::set<SimpleType> prims; // primitive types
   std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
       record; // record fields
   std::optional<
@@ -281,7 +304,9 @@ struct CompactTypeScheme {
 };
 
 // CompactType helper functions
-std::shared_ptr<CompactType> make_empty_compact_type();
+inline std::shared_ptr<CompactType> make_empty_compact_type() {
+  return std::make_shared<CompactType>();
+}
 std::shared_ptr<CompactType>
 merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
                     const std::shared_ptr<CompactType> &rhs);
@@ -300,7 +325,8 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &ty);
 UTypePtr coalesceCompactType(const CompactTypeScheme &st);
 
 // Simplification transformations
-CompactTypeScheme removePolarVariables(const CompactTypeScheme &ty, const OccurrenceMap &occMap);
+CompactTypeScheme removePolarVariables(const CompactTypeScheme &ty,
+                                       const OccurrenceMap &occMap);
 
 // ============= Type schemes (let-polymorphism without AST) =================
 struct MonoScheme {
