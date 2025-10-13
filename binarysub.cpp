@@ -572,7 +572,7 @@ UTypePtr coalesceType(const SimpleType& st) {
 
 CompactTypeScheme compactType(const SimpleType &st) {
   std::map<PolarVar, std::shared_ptr<VariableState>> recursive;
-  std::map<std::uint32_t, std::shared_ptr<CompactType>> recVars;
+  std::map<VariableState*, std::shared_ptr<CompactType>> recVars;
   VarSupply freshSupply; // For creating fresh variables when needed
   
   auto empty_compact = make_empty_compact_type();
@@ -649,7 +649,7 @@ CompactTypeScheme compactType(const SimpleType &st) {
           // Check if we created a recursive variable
           auto recIt = recursive.find(tv_pol);
           if (recIt != recursive.end()) {
-            recVars[recIt->second->id] = bound;
+            recVars[recIt->second.get()] = bound;
             return make_compact({std::make_shared<TypeNode>(TVariable{recIt->second})});
           } else {
             return bound;
@@ -670,7 +670,7 @@ CompactTypeScheme compactType(const SimpleType &st) {
 
 CompactTypeScheme canonicalizeType(const SimpleType &st) {
   std::map<std::pair<std::shared_ptr<CompactType>, bool>, std::shared_ptr<VariableState>> recursive;
-  std::map<std::uint32_t, std::shared_ptr<CompactType>> recVars;
+  std::map<VariableState*, std::shared_ptr<CompactType>> recVars;
   VarSupply freshSupply;
   
   auto empty_compact = make_empty_compact_type();
@@ -819,7 +819,7 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       // Check if we created a recursive variable
       auto recIt = recursive.find(pty);
       if (recIt != recursive.end()) {
-        recVars[recIt->second->id] = adapted;
+        recVars[recIt->second.get()] = adapted;
         return make_compact({std::make_shared<TypeNode>(TVariable{recIt->second})});
       } else {
         return adapted;
@@ -837,8 +837,8 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
 // Co-occurrence analysis implementation
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
   std::map<PolarVar, std::set<SimpleType>> coOccurrences;
-  std::set<std::uint32_t> allVars;
-  std::map<std::uint32_t, std::shared_ptr<CompactType>> processedRecVars;
+  std::set<VariableState*> allVars;
+  std::map<VariableState*, std::shared_ptr<CompactType>> processedRecVars;
   
   // Traverses the type, performing the analysis
   std::function<void(std::shared_ptr<CompactType>, bool)> go = 
@@ -851,7 +851,7 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
     for (const auto& var : ty->vars) {
       newOccs.insert(var);
       if (auto tv = var->getAsTVariable()) {
-        allVars.insert(tv->state->id);
+        allVars.insert(tv->state.get());
         
         PolarVar key{tv->state.get(), pol};
         
@@ -869,10 +869,10 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
         }
         
         // If this is a recursive variable, process its bound
-        auto recIt = cty.recVars.find(tv->state->id);
+        auto recIt = cty.recVars.find(tv->state.get());
         if (recIt != cty.recVars.end() && 
-            processedRecVars.find(tv->state->id) == processedRecVars.end()) {
-          processedRecVars[tv->state->id] = recIt->second;
+            processedRecVars.find(tv->state.get()) == processedRecVars.end()) {
+          processedRecVars[tv->state.get()] = recIt->second;
           go(recIt->second, pol);
         }
       }
@@ -921,19 +921,19 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
 
 CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
   // State accumulated during the analysis phase
-  std::set<std::uint32_t> allVars;
-  std::map<std::uint32_t, std::shared_ptr<CompactType>> recVars = cty.recVars;
+  std::set<VariableState*> allVars;
+  std::map<VariableState*, std::shared_ptr<CompactType>> recVars = cty.recVars;
   auto coOccurrences = analyzeOccurrences(cty);
   
   // This will be filled up after the analysis phase, to influence the reconstruction phase
-  std::map<std::uint32_t, std::optional<std::uint32_t>> varSubst;
+  std::map<VariableState*, std::optional<VariableState*>> varSubst;
   
   // Collect all variables from the type scheme
   std::function<void(std::shared_ptr<CompactType>)> collectVars = 
     [&](std::shared_ptr<CompactType> ty) -> void {
     for (const auto& var : ty->vars) {
       if (auto tv = var->getAsTVariable()) {
-        allVars.insert(tv->state->id);
+        allVars.insert(tv->state.get());
       }
     }
     if (ty->record) {
@@ -948,22 +948,21 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
   };
   
   collectVars(cty.cty);
-  for (const auto& [varId, bound] : recVars) {
-    allVars.insert(varId);
+  for (const auto& [varPtr, bound] : recVars) {
+    allVars.insert(varPtr);
     collectVars(bound);
   }
   
   // Step 1: Simplify away non-recursive variables that only occur in positive or negative positions
-  for (std::uint32_t varId : allVars) {
-    if (recVars.find(varId) == recVars.end()) { // Non-recursive variable
-      // Create dummy variable state to create PolarVar keys
-      auto dummyState = std::make_shared<VariableState>(varId, 0);
-      PolarVar posKey{dummyState.get(), true};
-      PolarVar negKey{dummyState.get(), false};
+  for (VariableState* varPtr : allVars) {
+    if (recVars.find(varPtr) == recVars.end()) { // Non-recursive variable
+      // Create PolarVar keys directly from the pointer
+      PolarVar posKey{varPtr, true};
+      PolarVar negKey{varPtr, false};
       
       bool hasPos = false, hasNeg = false;
       for (const auto& [key, occs] : coOccurrences) {
-        if (key.vs->id == varId) {
+        if (key.vs == varPtr) {
           if (key.pos) hasPos = true;
           else hasNeg = true;
         }
@@ -971,20 +970,17 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
       
       if ((hasPos && !hasNeg) || (!hasPos && hasNeg)) {
         // Variable only occurs in one polarity - remove it
-        varSubst[varId] = std::nullopt;
+        varSubst[varPtr] = std::nullopt;
       }
     }
   }
   
   // Step 2: Unify equivalent variables based on polar co-occurrence analysis
-  for (std::uint32_t varId : allVars) {
-    if (varSubst.find(varId) != varSubst.end()) continue; // Already processed
-    
-    // Create dummy variable state for PolarVar keys
-    auto dummyState = std::make_shared<VariableState>(varId, 0);
+  for (VariableState* varPtr : allVars) {
+    if (varSubst.find(varPtr) != varSubst.end()) continue; // Already processed
     
     for (bool pol : {true, false}) {
-      PolarVar varKey{dummyState.get(), pol};
+      PolarVar varKey{varPtr, pol};
       auto varOccIt = coOccurrences.find(varKey);
       if (varOccIt == coOccurrences.end()) continue;
       
@@ -992,23 +988,22 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
       
       for (const auto& coOccType : varOccs) {
         if (auto coOccVar = coOccType->getAsTVariable()) {
-          std::uint32_t coOccId = coOccVar->state->id;
+          VariableState* coOccPtr = coOccVar->state.get();
           
-          if (coOccId != varId && 
-              varSubst.find(coOccId) == varSubst.end() &&
-              (recVars.count(varId) > 0) == (recVars.count(coOccId) > 0)) {
+          if (coOccPtr != varPtr && 
+              varSubst.find(coOccPtr) == varSubst.end() &&
+              (recVars.count(varPtr) > 0) == (recVars.count(coOccPtr) > 0)) {
             
-            // Check if coOccVar always co-occurs with varId in this polarity
-            auto coOccDummyState = std::make_shared<VariableState>(coOccId, 0);
-            PolarVar coOccKey{coOccDummyState.get(), pol};
+            // Check if coOccVar always co-occurs with varPtr in this polarity
+            PolarVar coOccKey{coOccPtr, pol};
             auto coOccOccIt = coOccurrences.find(coOccKey);
             
             if (coOccOccIt != coOccurrences.end()) {
-              // Check if coOccVar's occurrences include varId
+              // Check if coOccVar's occurrences include varPtr
               bool alwaysCoOccurs = true;
               for (const auto& occType : coOccOccIt->second) {
                 if (auto occVar = occType->getAsTVariable()) {
-                  if (occVar->state->id == varId) {
+                  if (occVar->state.get() == varPtr) {
                     goto found_var;
                   }
                 }
@@ -1017,14 +1012,14 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
               
               found_var:
               if (alwaysCoOccurs) {
-                // Unify coOccId into varId
-                varSubst[coOccId] = varId;
+                // Unify coOccPtr into varPtr
+                varSubst[coOccPtr] = varPtr;
                 
                 // If both are recursive, merge their bounds
-                if (recVars.count(varId) && recVars.count(coOccId)) {
-                  auto mergedBound = merge_compact_types(pol, recVars[varId], recVars[coOccId]);
-                  recVars[varId] = mergedBound;
-                  recVars.erase(coOccId);
+                if (recVars.count(varPtr) && recVars.count(coOccPtr)) {
+                  auto mergedBound = merge_compact_types(pol, recVars[varPtr], recVars[coOccPtr]);
+                  recVars[varPtr] = mergedBound;
+                  recVars.erase(coOccPtr);
                 }
               }
             }
@@ -1033,8 +1028,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
         // Check for primitive co-occurrence (variable always occurs with a primitive)
         else if (auto prim = coOccType->getAsTPrimitive()) {
           // Check if variable also occurs in opposite polarity with the same primitive
-          auto oppDummyState = std::make_shared<VariableState>(varId, 0);
-          PolarVar oppKey{oppDummyState.get(), !pol};
+          PolarVar oppKey{varPtr, !pol};
           auto oppOccIt = coOccurrences.find(oppKey);
           
           if (oppOccIt != coOccurrences.end()) {
@@ -1043,7 +1037,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
                 if (oppPrim->name == prim->name) {
                   // Variable always occurs with the same primitive in both polarities
                   // Remove the variable
-                  varSubst[varId] = std::nullopt;
+                  varSubst[varPtr] = std::nullopt;
                   break;
                 }
               }
@@ -1065,12 +1059,12 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
     // Apply substitutions to variables
     for (const auto& var : ty->vars) {
       if (auto tv = var->getAsTVariable()) {
-        std::uint32_t varId = tv->state->id;
-        auto substIt = varSubst.find(varId);
+        VariableState* varPtr = tv->state.get();
+        auto substIt = varSubst.find(varPtr);
         if (substIt != varSubst.end()) {
           if (substIt->second.has_value()) {
             // Substitute with another variable
-            auto newVarState = std::make_shared<VariableState>(substIt->second.value(), tv->state->level);
+            auto newVarState = std::make_shared<VariableState>(substIt->second.value()->id, tv->state->level);
             result->vars.insert(std::make_shared<TypeNode>(TVariable{newVarState}));
           }
           // If nullopt, remove the variable (don't add to result)
@@ -1108,14 +1102,14 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
   auto newTerm = reconstruct(cty.cty);
   
   // Reconstruct recursive variable bounds with substitutions applied
-  std::map<std::uint32_t, std::shared_ptr<CompactType>> newRecVars;
-  for (const auto& [varId, bound] : recVars) {
-    auto substIt = varSubst.find(varId);
+  std::map<VariableState*, std::shared_ptr<CompactType>> newRecVars;
+  for (const auto& [varPtr, bound] : recVars) {
+    auto substIt = varSubst.find(varPtr);
     if (substIt == varSubst.end() || substIt->second.has_value()) {
-      // Keep this recursive variable (possibly with new ID)
-      std::uint32_t newVarId = (substIt != varSubst.end() && substIt->second.has_value()) 
-                                ? substIt->second.value() : varId;
-      newRecVars[newVarId] = reconstruct(bound);
+      // Keep this recursive variable (possibly with new pointer)
+      VariableState* newVarPtr = (substIt != varSubst.end() && substIt->second.has_value()) 
+                                ? substIt->second.value() : varPtr;
+      newRecVars[newVarPtr] = reconstruct(bound);
     }
   }
   
@@ -1157,7 +1151,7 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty) {
     for (const auto& var : ty->vars) {
       if (auto tv = var->getAsTVariable()) {
         // Check if this is a recursive variable
-        auto recIt = cty.recVars.find(tv->state->id);
+        auto recIt = cty.recVars.find(tv->state.get());
         if (recIt != cty.recVars.end()) {
           // Recursive variable - process its bound
           auto boundType = go(recIt->second, pol, newInProcess);

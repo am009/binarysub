@@ -299,7 +299,7 @@ struct CompactType {
 
 struct CompactTypeScheme {
   std::shared_ptr<CompactType> cty;
-  std::map<std::uint32_t, std::shared_ptr<CompactType>>
+  std::map<VariableState*, std::shared_ptr<CompactType>>
       recVars; // recursive variable bounds
 };
 
