@@ -641,10 +641,12 @@ int demo_twice() {
   std::cout << "  α <: γ → δ  (f must accept γ and return final result δ)\n";
 
   // Show final twice type after all constraints
-  std::cout << "  Final twice type: " << printType(coalesceType(twice_type))
-            << "\n";
-  std::cout << "  After simplification: "
-            << printType(simplifyType(coalesceType(twice_type))) << "\n\n";
+  auto ct1 = compactType(twice_type);
+  std::cout << "  Final twice compact type: " << toString(*ct1.cty) << "\n";
+  auto t2 = coalesceCompactType(ct1);
+  std::cout << "  Final twice type: " << printType(t2) << "\n";
+  std::cout << "  After simplification: " << printType(simplifyType(t2))
+            << "\n\n";
 
   // At this point, α has two upper bounds: (β → γ) and (γ → δ)
   // Check that the variables are properly constrained
@@ -1282,6 +1284,60 @@ merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
     result->function = rhs->function;
   }
 
+  return result;
+}
+
+std::string toString(const CompactType &ct) {
+  std::string result = "{";
+
+  if (!ct.vars.empty()) {
+    result += "vars: {";
+    bool first = true;
+    for (const auto &var : ct.vars) {
+      if (!first)
+        result += ", ";
+      result += std::to_string(var);
+      first = false;
+    }
+    result += "}";
+  }
+
+  if (!ct.prims.empty()) {
+    if (!ct.vars.empty())
+      result += ", ";
+    result += "prims: {";
+    bool first = true;
+    for (const auto &prim : ct.prims) {
+      if (!first)
+        result += ", ";
+      result += prim;
+      first = false;
+    }
+    result += "}";
+  }
+
+  if (ct.record) {
+    if (!ct.vars.empty() || !ct.prims.empty())
+      result += ", ";
+    result += "record: {";
+    bool first = true;
+    for (const auto &[field_name, field_type] : *ct.record) {
+      if (!first)
+        result += ", ";
+      result += field_name + ": " + toString(*field_type);
+      first = false;
+    }
+    result += "}";
+  }
+
+  if (ct.function) {
+    if (!ct.vars.empty() || !ct.prims.empty() || ct.record)
+      result += ", ";
+    result += "function: (" + toString(*ct.function->first) + " -> " +
+              toString(*ct.function->second) + ")";
+  }
+
+  result += "}";
   return result;
 }
 
