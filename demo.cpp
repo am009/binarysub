@@ -2,6 +2,19 @@
 
 using namespace simplesub;
 
+// Helper function to display CompactTypeScheme
+void printCompactTypeScheme(const CompactTypeScheme &cts, const std::string &title) {
+  std::cout << title << ":\n";
+  std::cout << "  Main type: " << toString(*cts.cty) << "\n";
+  if (!cts.recVars.empty()) {
+    std::cout << "  Recursive variables:\n";
+    for (const auto& [varPtr, bound] : cts.recVars) {
+      std::cout << "    α" << varPtr->id << " = " << toString(*bound) << "\n";
+    }
+  }
+  std::cout << "\n";
+}
+
 // ======================= Demo implementation ==============
 int demo_levels() {
   VarSupply supply;
@@ -93,8 +106,12 @@ int demo_twice() {
   // Show final twice type after all constraints
   auto ct1 = compactType(twice_type);
   std::cout << "✓ Compacted successfully\n";
+  printCompactTypeScheme(ct1, "CompactType before simplification");
+  
   auto simplified_ct1 = simplifyType(ct1);
   std::cout << "✓ Simplified successfully\n";
+  printCompactTypeScheme(simplified_ct1, "CompactType after simplification");
+  
   auto t2 = coalesceCompactType(simplified_ct1);
   std::cout << "Final twice type: " << printType(t2) << "\n";
 
@@ -118,9 +135,11 @@ int demo_simplification() {
   // Process through the pipeline
   auto compact_func = compactType(simple_func);
   std::cout << "✓ Compacted successfully\n";
+  printCompactTypeScheme(compact_func, "CompactType before simplification");
   
   auto simplified_func = simplifyType(compact_func);
   std::cout << "✓ Simplified successfully\n";
+  printCompactTypeScheme(simplified_func, "CompactType after simplification");
   
   auto final_func = coalesceCompactType(simplified_func);
   std::cout << "Final type: " << printType(final_func) << "\n\n";
@@ -138,7 +157,11 @@ int demo_simplification() {
   
   // Process through the pipeline
   auto compact_constrained = compactType(constrained_func);
+  printCompactTypeScheme(compact_constrained, "CompactType before simplification");
+  
   auto simplified_constrained = simplifyType(compact_constrained);
+  printCompactTypeScheme(simplified_constrained, "CompactType after simplification");
+  
   auto final_constrained = coalesceCompactType(simplified_constrained);
   std::cout << "Final type: " << printType(final_constrained) << "\n\n";
   

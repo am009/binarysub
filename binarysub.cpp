@@ -475,8 +475,83 @@ merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
 }
 
 std::string toString(const CompactType &ct) {
-  // TODO: Implement toString for CompactType
-  return "";
+  std::ostringstream oss;
+  
+  std::vector<std::string> components;
+  
+  // Add variables
+  if (!ct.vars.empty()) {
+    std::vector<std::string> varNames;
+    for (const auto& var : ct.vars) {
+      if (auto tv = var->getAsTVariable()) {
+        varNames.push_back("α" + std::to_string(tv->state->id));
+      }
+    }
+    if (!varNames.empty()) {
+      if (varNames.size() == 1) {
+        components.push_back(varNames[0]);
+      } else {
+        components.push_back("{" + std::accumulate(varNames.begin(), varNames.end(), std::string(),
+          [](const std::string& a, const std::string& b) {
+            return a.empty() ? b : a + ", " + b;
+          }) + "}");
+      }
+    }
+  }
+  
+  // Add primitives
+  if (!ct.prims.empty()) {
+    std::vector<std::string> primNames;
+    for (const auto& prim : ct.prims) {
+      if (auto p = prim->getAsTPrimitive()) {
+        primNames.push_back(p->name);
+      }
+    }
+    if (!primNames.empty()) {
+      if (primNames.size() == 1) {
+        components.push_back(primNames[0]);
+      } else {
+        components.push_back("{" + std::accumulate(primNames.begin(), primNames.end(), std::string(),
+          [](const std::string& a, const std::string& b) {
+            return a.empty() ? b : a + ", " + b;
+          }) + "}");
+      }
+    }
+  }
+  
+  // Add record type
+  if (ct.record && !ct.record->empty()) {
+    std::ostringstream recordOss;
+    recordOss << "{";
+    bool first = true;
+    for (const auto& [fieldName, fieldType] : *ct.record) {
+      if (!first) recordOss << "; ";
+      recordOss << fieldName << ": " << toString(*fieldType);
+      first = false;
+    }
+    recordOss << "}";
+    components.push_back(recordOss.str());
+  }
+  
+  // Add function type
+  if (ct.function) {
+    std::string lhs = toString(*ct.function->first);
+    std::string rhs = toString(*ct.function->second);
+    components.push_back("(" + lhs + " → " + rhs + ")");
+  }
+  
+  // Combine components
+  if (components.empty()) {
+    return "⊥"; // Empty type
+  } else if (components.size() == 1) {
+    return components[0];
+  } else {
+    // Multiple components - combine with union
+    return std::accumulate(components.begin(), components.end(), std::string(),
+      [](const std::string& a, const std::string& b) {
+        return a.empty() ? b : a + " ∪ " + b;
+      });
+  }
 }
 
 // Coalesce SimpleType to UType for display purposes
