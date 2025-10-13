@@ -316,6 +316,7 @@ std::string toString(const CompactType &ct);
 // Co-occurrence analysis data structures
 using OccurrenceMap = std::map<PolarVar, std::set<SimpleType>>;
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &ty);
+std::string toString(const OccurrenceMap &om);
 
 // Coalesce SimpleType to UType for display purposes
 UTypePtr coalesceType(const SimpleType& st);

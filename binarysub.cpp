@@ -554,6 +554,49 @@ std::string toString(const CompactType &ct) {
   }
 }
 
+std::string toString(const OccurrenceMap &om) {
+  if (om.empty()) {
+    return "{}";
+  }
+  
+  std::ostringstream oss;
+  oss << "{";
+  bool first = true;
+  
+  for (const auto& [polarVar, typeSet] : om) {
+    if (!first) {
+      oss << ", ";
+    }
+    
+    // Format the PolarVar
+    oss << "α" << polarVar.vs->id << (polarVar.pos ? "⁺" : "⁻");
+    oss << " → {";
+    
+    // Format the set of SimpleTypes
+    bool firstType = true;
+    for (const auto& type : typeSet) {
+      if (!firstType) {
+        oss << ", ";
+      }
+      
+      if (auto tv = type->getAsTVariable()) {
+        oss << "α" << tv->state->id;
+      } else if (auto prim = type->getAsTPrimitive()) {
+        oss << prim->name;
+      } else {
+        oss << "?"; // fallback for other types
+      }
+      firstType = false;
+    }
+    
+    oss << "}";
+    first = false;
+  }
+  
+  oss << "}";
+  return oss.str();
+}
+
 // Coalesce SimpleType to UType for display purposes
 UTypePtr coalesceType(const SimpleType& st) {
   std::map<std::pair<VariableState*, bool>, std::string> recursive;
