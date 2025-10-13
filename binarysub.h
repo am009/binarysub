@@ -17,6 +17,47 @@
 
 namespace simplesub {
 
+// Forward declaration for error handling
+template <typename E> class unexpected {
+public:
+  unexpected(E &&error) : error_(std::move(error)) {}
+  unexpected(const E &error) : error_(error) {}
+  const E &error() const { return error_; }
+
+private:
+  E error_;
+};
+
+template <typename E> unexpected<E> make_unexpected(E &&error) {
+  return unexpected<E>(std::forward<E>(error));
+}
+
+template <typename T, typename E> class expected {
+public:
+  expected() : has_value_(true) {}
+  expected(const T &value) : has_value_(true), value_(value) {}
+
+  template <typename U>
+  expected(const unexpected<U> &error)
+      : has_value_(false), error_(error.error()) {}
+
+  bool has_value() const { return has_value_; }
+  operator bool() const { return has_value_; }
+  bool operator!() const { return !has_value_; }
+
+  const T &value() const { return value_; }
+  T &value() { return value_; }
+
+  const E &error() const { return error_; }
+
+private:
+  bool has_value_;
+  union {
+    T value_;
+    E error_;
+  };
+};
+
 // ======================= Fresh supply & scope levels =======================
 struct VarSupply {
   std::uint32_t next = 0;
@@ -105,47 +146,6 @@ SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields);
 // Utility functions
 int level_of(const SimpleType &st);
 
-// Forward declaration for error handling
-template <typename E> class unexpected {
-public:
-  unexpected(E &&error) : error_(std::move(error)) {}
-  unexpected(const E &error) : error_(error) {}
-  const E &error() const { return error_; }
-
-private:
-  E error_;
-};
-
-template <typename E> unexpected<E> make_unexpected(E &&error) {
-  return unexpected<E>(std::forward<E>(error));
-}
-
-template <typename T, typename E> class expected {
-public:
-  expected() : has_value_(true) {}
-  expected(const T &value) : has_value_(true), value_(value) {}
-
-  template <typename U>
-  expected(const unexpected<U> &error)
-      : has_value_(false), error_(error.error()) {}
-
-  bool has_value() const { return has_value_; }
-  operator bool() const { return has_value_; }
-  bool operator!() const { return !has_value_; }
-
-  const T &value() const { return value_; }
-  T &value() { return value_; }
-
-  const E &error() const { return error_; }
-
-private:
-  bool has_value_;
-  union {
-    T value_;
-    E error_;
-  };
-};
-
 // Specialization for void
 template <typename E> class expected<void, E> {
 public:
@@ -175,14 +175,14 @@ struct Error {
 using Cache = std::set<std::pair<const TypeNode *, const TypeNode *>>;
 
 // ======================= Extrusion (level-fixing copy) =====================
-struct PolarVS {
+struct PolarVar {
   VariableState *vs;
   bool pos;
-  bool operator<(const PolarVS &other) const;
+  bool operator<(const PolarVar &other) const;
 };
 
 SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
-                   std::map<PolarVS, std::shared_ptr<VariableState>> &cache,
+                   std::map<PolarVar, std::shared_ptr<VariableState>> &cache,
                    VarSupply &supply);
 
 // ======================= Subtype constraint solver with levels =============
@@ -251,17 +251,11 @@ UTypePtr make_urecursivetype(std::string name, UTypePtr body);
 UTypePtr make_utypevariable(std::string name);
 UTypePtr make_uprimitivetype(std::string name);
 
-// Type coalescing
-struct PolarVar {
-  VariableState *vs;
-  bool polar; // true = positive, false = negative
-  bool operator<(const PolarVar &other) const;
-};
-
-UTypePtr coalesceType(const SimpleType &st);
-UTypePtr coalesceTypeImpl(const SimpleType &st, bool polar,
-                          std::set<PolarVar> &inProcess,
-                          std::map<PolarVar, std::string> &recursive);
+// TODO remove
+// UTypePtr coalesceType(const SimpleType &st);
+// UTypePtr coalesceTypeImpl(const SimpleType &st, bool polar,
+//                           std::set<PolarVS> &inProcess,
+//                           std::map<PolarVS, std::string> &recursive);
 
 // Pretty printing
 std::string printType(const UTypePtr &ty);
@@ -271,8 +265,8 @@ void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence = 0);
 
 // Intermediate representation for simplification (Section 4.4)
 struct CompactType {
-  std::set<std::uint32_t> vars; // type variables
-  std::set<std::string> prims;  // primitive types
+  std::set<SimpleType> vars; // type variables
+  std::set<SimpleType> prims;  // primitive types
   std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
       record; // record fields
   std::optional<
@@ -286,31 +280,6 @@ struct CompactTypeScheme {
       recVars; // recursive variable bounds
 };
 
-// Co-occurrence analysis data structures
-struct CoOccurrence {
-  std::set<std::uint32_t> positiveVars; // variables that co-occur positively
-  std::set<std::uint32_t> negativeVars; // variables that co-occur negatively
-  std::set<std::string> positivePrims;  // primitives that co-occur positively
-  std::set<std::string> negativePrims;  // primitives that co-occur negatively
-};
-
-// Variable occurrence analysis
-struct VariableOccurrence {
-  bool appearsPositive = false;
-  bool appearsNegative = false;
-  CoOccurrence coOccurs;
-};
-
-using OccurrenceMap = std::map<std::uint32_t, VariableOccurrence>;
-
-// Simplification functions
-UTypePtr simplifyType(const UTypePtr &ty);
-CompactTypeScheme compactType(const SimpleType &st);
-UTypePtr coalesceCompactType(const CompactTypeScheme &scheme);
-inline UTypePtr coalesceTypeCompact(const SimpleType &st) {
-  return coalesceCompactType(compactType(st));
-}
-
 // CompactType helper functions
 std::shared_ptr<CompactType> make_empty_compact_type();
 std::shared_ptr<CompactType>
@@ -318,22 +287,20 @@ merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
                     const std::shared_ptr<CompactType> &rhs);
 std::string toString(const CompactType &ct);
 
-// Analysis functions
-OccurrenceMap analyzeOccurrences(const UTypePtr &ty);
-void analyzeOccurrencesImpl(const UTypePtr &ty, bool positive,
-                            OccurrenceMap &occMap,
-                            std::set<std::uint32_t> &currentContext);
+// Co-occurrence analysis data structures
+
+using OccurrenceMap = std::map<PolarVar, std::set<SimpleType>>;
+OccurrenceMap analyzeOccurrences(const CompactTypeScheme &ty);
+
+// Simplification functions
+CompactTypeScheme compactType(const SimpleType &st);
+CompactTypeScheme canonicalizeType(const SimpleType &st);
+CompactTypeScheme simplifyType(const CompactTypeScheme &ty);
+// Coalesces a CompactTypeScheme into a Type while performing hash-consing
+UTypePtr coalesceCompactType(const CompactTypeScheme &st);
 
 // Simplification transformations
-UTypePtr removePolarVariables(const UTypePtr &ty, const OccurrenceMap &occMap);
-UTypePtr unifyIndistinguishableVariables(const UTypePtr &ty,
-                                         const OccurrenceMap &occMap);
-UTypePtr flattenVariableSandwiches(const UTypePtr &ty,
-                                   const OccurrenceMap &occMap);
-
-// Hash consing support
-using TypeHashMap = std::map<std::string, UTypePtr>;
-UTypePtr hashConsType(const UTypePtr &ty, TypeHashMap &hashMap);
+CompactTypeScheme removePolarVariables(const CompactTypeScheme &ty, const OccurrenceMap &occMap);
 
 // ============= Type schemes (let-polymorphism without AST) =================
 struct MonoScheme {
