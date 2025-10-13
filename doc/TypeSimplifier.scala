@@ -192,10 +192,11 @@ trait TypeSimplifier { self: Typer =>
     // This will be filled up after the analysis phase, to influence the reconstruction phase:
     val varSubst = MutMap.empty[Variable, Option[Variable]]
     
-    // Traverses the type, performing the analysis, and returns a thunk to reconstruct it later:
+    // Traverses the type, performing the analysis, and returns a thunk function to reconstruct it later:
     def go(ty: CompactType, pol: Boolean): () => CompactType = {
       ty.vars.foreach { tv =>
         allVars += tv
+        // 更新求coOccurrences，但是包含primitive的类型。
         val newOccs = LinkedHashSet.from(ty.vars.iterator ++ ty.prims)
         coOccurrences.get(pol -> tv) match {
           case Some(os) => os.filterInPlace(newOccs) // computes the intersection

@@ -313,7 +313,6 @@ merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
 std::string toString(const CompactType &ct);
 
 // Co-occurrence analysis data structures
-
 using OccurrenceMap = std::map<PolarVar, std::set<SimpleType>>;
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &ty);
 
