@@ -87,10 +87,6 @@ struct TPrimitive {
   std::string name;
 };
 
-struct TVariable {
-  std::shared_ptr<VariableState> state;
-};
-
 struct TFunction {
   SimpleType lhs, rhs;
 };
@@ -100,18 +96,18 @@ struct TRecord {
 };
 
 struct TypeNode {
-  std::variant<TPrimitive, TVariable, TFunction, TRecord> v;
+  std::variant<TPrimitive, VariableState, TFunction, TRecord> v;
 
   explicit TypeNode(TPrimitive p);
-  explicit TypeNode(TVariable v_);
+  explicit TypeNode(VariableState vs);
   explicit TypeNode(TFunction f);
   explicit TypeNode(TRecord r);
 
   TPrimitive *getAsTPrimitive();
   const TPrimitive *getAsTPrimitive() const;
 
-  TVariable *getAsTVariable();
-  const TVariable *getAsTVariable() const;
+  VariableState *getAsVariableState();
+  const VariableState *getAsVariableState() const;
 
   TFunction *getAsTFunction();
   const TFunction *getAsTFunction() const;
@@ -123,7 +119,7 @@ struct TypeNode {
   const TFunction &getAsTFunctionRef() const;
 
   bool isTPrimitive() const;
-  bool isTVariable() const;
+  bool isVariableState() const;
   bool isTFunction() const;
   bool isTRecord() const;
 };
@@ -131,7 +127,7 @@ struct TypeNode {
 // Helper functions for type checking variant types directly
 template <typename T> constexpr bool isTPrimitiveType();
 
-template <typename T> constexpr bool isTVariableType();
+template <typename T> constexpr bool isVariableStateType();
 
 template <typename T> constexpr bool isTFunctionType();
 
@@ -146,6 +142,7 @@ SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields);
 
 // Utility functions
 int level_of(const SimpleType &st);
+VariableState *extractVariableState(const SimpleType &st);
 
 // Specialization for void
 template <typename E> class expected<void, E> {
@@ -178,11 +175,13 @@ using Cache = std::set<std::pair<const TypeNode *, const TypeNode *>>;
 
 // ======================= Extrusion (level-fixing copy) =====================
 struct PolarVar {
-  VariableState *vs;
+  SimpleType var;
   bool pos;
   bool operator<(const PolarVar &other) const {
-    if (vs != other.vs)
-      return vs < other.vs;
+    auto var_ptr = extractVariableState(var);
+    auto other_var_ptr = extractVariableState(other.var);
+    if (var_ptr != other_var_ptr)
+      return var_ptr < other_var_ptr;
     return pos < other.pos;
   }
 };
@@ -300,7 +299,7 @@ struct CompactType {
 
 struct CompactTypeScheme {
   std::shared_ptr<CompactType> cty;
-  std::map<VariableState *, std::shared_ptr<CompactType>>
+  std::map<SimpleType, std::shared_ptr<CompactType>>
       recVars; // recursive variable bounds
 };
 
@@ -349,7 +348,7 @@ struct PolyScheme {
 using TypeScheme = std::variant<MonoScheme, PolyScheme>;
 
 SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
-                             std::map<VariableState *, SimpleType> &memo,
+                             std::map<SimpleType, SimpleType> &memo,
                              VarSupply &supply);
 
 SimpleType instantiate(const TypeScheme &sch, int at_level, VarSupply &supply);

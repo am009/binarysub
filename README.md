@@ -39,13 +39,13 @@ SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields);
 ```cpp
 // TypeNode 成员函数，用于类型判断
 bool isTPrimitive() const;
-bool isTVariable() const;
+bool isVariableState() const;
 bool isTFunction() const;
 bool isTRecord() const;
 
 // 获取特定类型的指针（可能为nullptr）
 TPrimitive* getAsTPrimitive();
-TVariable* getAsTVariable();
+TVariable* getAsVariableState();
 TFunction* getAsTFunction();
 TRecord* getAsTRecord();
 ```

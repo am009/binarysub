@@ -8,11 +8,41 @@ void printCompactTypeScheme(const CompactTypeScheme &cts, const std::string &tit
   std::cout << "  Main type: " << toString(*cts.cty) << "\n";
   if (!cts.recVars.empty()) {
     std::cout << "  Recursive variables:\n";
-    for (const auto& [varPtr, bound] : cts.recVars) {
+    for (const auto& [varSimpleType, bound] : cts.recVars) {
+      auto varPtr = extractVariableState(varSimpleType);
       std::cout << "    α" << varPtr->id << " = " << toString(*bound) << "\n";
     }
   }
   std::cout << "\n";
+}
+
+// Test that VariableState is directly stored in variant
+int test_variant_structure() {
+  std::cout << "=== Testing Variant Structure ===\n";
+  
+  VarSupply supply;
+  auto var_type = make_variable(42, 1);
+  
+  // Test that we can directly access VariableState
+  auto vs = var_type->getAsVariableState();
+  if (vs && vs->id == 42 && vs->level == 1) {
+    std::cout << "✓ VariableState directly stored in variant with id=" << vs->id << " level=" << vs->level << "\n";
+  } else {
+    std::cout << "✗ Failed to access VariableState directly\n";
+    return 1;
+  }
+  
+  // Test that extractVariableState works
+  auto extracted_vs = extractVariableState(var_type);
+  if (extracted_vs && extracted_vs->id == 42 && extracted_vs->level == 1) {
+    std::cout << "✓ extractVariableState helper works correctly\n";
+  } else {
+    std::cout << "✗ extractVariableState failed\n"; 
+    return 1;
+  }
+  
+  std::cout << "✓ Variant structure test passed\n\n";
+  return 0;
 }
 
 // ======================= Demo implementation ==============
@@ -172,6 +202,12 @@ int demo_simplification() {
 
 int main() {
   std::cout << "\n=== Simple-sub Type Inference Demo ===\n\n";
+
+  int result0 = test_variant_structure();
+  if (result0 != 0) {
+    std::cerr << "test_variant_structure failed\n";
+    return result0;
+  }
 
   int result1 = demo_levels();
   if (result1 != 0) {
