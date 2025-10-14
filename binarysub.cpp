@@ -1,7 +1,7 @@
 #include "binarysub.h"
 #include <sstream>
 
-namespace simplesub {
+namespace binarysub {
 
 // ======================= Implementation =======================
 
@@ -396,12 +396,12 @@ TypeScheme generalize(const SimpleType &rhs, int env_level) {
   return PolyScheme{env_level, rhs};
 }
 
-} // namespace simplesub
+} // namespace binarysub
 
 // =================== Type Simplification Implementation
 // ===========================
 
-namespace simplesub {
+namespace binarysub {
 
 // Helper function to get variable ID from type variable names (assumes format
 // "α123")
@@ -1160,6 +1160,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
 
   // Step 2: Unify equivalent variables based on polar co-occurrence analysis
   for (SimpleType varPtr : allVars) {
+    assert(varPtr->isVariableState());
     auto varState = varPtr->getAsVariableState();
     if (varSubst.find(varPtr) != varSubst.end())
       continue; // Already processed
@@ -1203,6 +1204,38 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
                                                          recVars[coOccPtr]);
                   recVars[varPtr] = mergedBound;
                   recVars.erase(coOccPtr);
+                } else {
+                  // If non recursive, fix coOccurrences map.
+                  // When unifying coOccPtr into varPtr, we need to update the opposite polarity co-occurrences
+                  PolarVar oppCoOccKey{coOccPtr, !pol};
+                  auto oppCoOccIt = coOccurrences.find(oppCoOccKey);
+                  
+                  if (oppCoOccIt != coOccurrences.end()) {
+                    // Update varPtr's opposite polarity co-occurrences to be the intersection
+                    // with coOccPtr's opposite polarity co-occurrences
+                    PolarVar oppVarKey{varPtr, !pol};
+                    auto oppVarIt = coOccurrences.find(oppVarKey);
+                    
+                    if (oppVarIt != coOccurrences.end()) {
+                      // Keep only variables that occur in both sets (plus varPtr itself)
+                      std::set<SimpleType> newVarOccs;
+                      for (const auto &var : oppVarIt->second.variables) {
+                        if (var == varPtr || oppCoOccIt->second.variables.count(var) > 0) {
+                          newVarOccs.insert(var);
+                        }
+                      }
+                      oppVarIt->second.variables = newVarOccs;
+                      
+                      // Keep only primitives that occur in both sets
+                      std::set<SimpleType> newPrimOccs;
+                      for (const auto &prim : oppVarIt->second.primitives) {
+                        if (oppCoOccIt->second.primitives.count(prim) > 0) {
+                          newPrimOccs.insert(prim);
+                        }
+                      }
+                      oppVarIt->second.primitives = newPrimOccs;
+                    }
+                  }
                 }
               }
             }
@@ -1411,4 +1444,4 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty) {
   return go(cty.cty, true, inProcess);
 }
 
-} // namespace simplesub
+} // namespace binarysub

@@ -92,7 +92,7 @@ int level_of(const SimpleType &st);
 
 ```cpp
 #include "binsub.h"
-using namespace simplesub;
+using namespace binarysub;
 
 int main() {
     VarSupply supply;
@@ -132,10 +132,6 @@ int main() {
 - 成功时包含值
 - 失败时包含错误信息
 - 提供 `has_value()`, `value()`, `error()` 等方法
-
-## 编译选项
-
-定义 `SIMPLESUB_DEMO` 宏可以启用演示功能，展示级别系统的完整工作流程。
 
 ## 特性
 

@@ -16,7 +16,7 @@
 #include <variant>
 #include <vector>
 
-namespace simplesub {
+namespace binarysub {
 
 // Forward declaration for error handling
 template <typename E> class unexpected {
@@ -355,6 +355,6 @@ SimpleType instantiate(const TypeScheme &sch, int at_level, VarSupply &supply);
 
 TypeScheme generalize(const SimpleType &rhs, int env_level);
 
-} // namespace simplesub
+} // namespace binarysub
 
 #endif // BINARYSUB_H

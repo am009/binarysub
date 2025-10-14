@@ -1,6 +1,6 @@
 #include "binarysub.h"
 
-using namespace simplesub;
+using namespace binarysub;
 
 // Helper function to display CompactTypeScheme
 void printCompactTypeScheme(const CompactTypeScheme &cts, const std::string &title) {
