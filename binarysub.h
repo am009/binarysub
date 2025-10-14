@@ -300,7 +300,7 @@ struct CompactType {
 
 struct CompactTypeScheme {
   std::shared_ptr<CompactType> cty;
-  std::map<VariableState*, std::shared_ptr<CompactType>>
+  std::map<VariableState *, std::shared_ptr<CompactType>>
       recVars; // recursive variable bounds
 };
 
@@ -315,15 +315,15 @@ std::string toString(const CompactType &ct);
 
 // Co-occurrence analysis data structures
 struct OccurrenceData {
-  std::set<SimpleType> variables;    // Only variable types
-  std::set<SimpleType> primitives;   // Only primitive types
+  std::set<SimpleType> variables;  // Only variable types
+  std::set<SimpleType> primitives; // Only primitive types
 };
 using OccurrenceMap = std::map<PolarVar, OccurrenceData>;
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &ty);
 std::string toString(const OccurrenceMap &om);
 
 // Coalesce SimpleType to UType for display purposes
-UTypePtr coalesceType(const SimpleType& st);
+UTypePtr coalesceType(const SimpleType &st);
 
 // Simplification functions
 CompactTypeScheme compactType(const SimpleType &st);
