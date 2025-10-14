@@ -563,33 +563,48 @@ std::string toString(const OccurrenceMap &om) {
   oss << "{";
   bool first = true;
   
-  for (const auto& [polarVar, typeSet] : om) {
+  for (const auto& [polarVar, occData] : om) {
     if (!first) {
       oss << ", ";
     }
     
     // Format the PolarVar
     oss << "α" << polarVar.vs->id << (polarVar.pos ? "⁺" : "⁻");
-    oss << " → {";
+    oss << " → {vars: {";
     
-    // Format the set of SimpleTypes
-    bool firstType = true;
-    for (const auto& type : typeSet) {
-      if (!firstType) {
+    // Format the variable set
+    bool firstVar = true;
+    for (const auto& var : occData.variables) {
+      if (!firstVar) {
         oss << ", ";
       }
       
-      if (auto tv = type->getAsTVariable()) {
+      if (auto tv = var->getAsTVariable()) {
         oss << "α" << tv->state->id;
-      } else if (auto prim = type->getAsTPrimitive()) {
-        oss << prim->name;
       } else {
-        oss << "?"; // fallback for other types
+        oss << "?var"; // fallback
       }
-      firstType = false;
+      firstVar = false;
     }
     
-    oss << "}";
+    oss << "}, prims: {";
+    
+    // Format the primitive set
+    bool firstPrim = true;
+    for (const auto& prim : occData.primitives) {
+      if (!firstPrim) {
+        oss << ", ";
+      }
+      
+      if (auto p = prim->getAsTPrimitive()) {
+        oss << p->name;
+      } else {
+        oss << "?prim"; // fallback
+      }
+      firstPrim = false;
+    }
+    
+    oss << "}}";
     first = false;
   }
   
@@ -954,20 +969,24 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
 
 // Co-occurrence analysis implementation
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
-  std::map<PolarVar, std::set<SimpleType>> coOccurrences;
+  std::map<PolarVar, OccurrenceData> coOccurrences;
   std::set<VariableState*> allVars;
   std::map<VariableState*, std::shared_ptr<CompactType>> processedRecVars;
   
   // Traverses the type, performing the analysis
   std::function<void(std::shared_ptr<CompactType>, bool)> go = 
     [&](std::shared_ptr<CompactType> ty, bool pol) -> void {
-    
-    // Collect all type variables and primitives that co-occur in this type
-    std::set<SimpleType> newOccs;
+
+    // std::cerr << "Visiting: " << toString(*ty) << "\n";
+    // Collect variables and primitives separately
+    std::set<SimpleType> newVars;
+    std::set<SimpleType> newPrims;
     
     // Add all variables 
     for (const auto& var : ty->vars) {
-      newOccs.insert(var);
+      newVars.insert(var);
+    }
+    for (const auto& var : ty->vars) {
       if (auto tv = var->getAsTVariable()) {
         allVars.insert(tv->state.get());
         
@@ -975,15 +994,15 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
         
         auto it = coOccurrences.find(key);
         if (it != coOccurrences.end()) {
-          // Compute intersection with existing occurrences
-          std::set<SimpleType> intersection;
-          std::set_intersection(it->second.begin(), it->second.end(),
-                               newOccs.begin(), newOccs.end(),
-                               std::inserter(intersection, intersection.begin()));
-          it->second = intersection;
+          // Compute intersection with existing occurrences for variables
+          std::set<SimpleType> varIntersection;
+          std::set_intersection(it->second.variables.begin(), it->second.variables.end(),
+                               newVars.begin(), newVars.end(),
+                               std::inserter(varIntersection, varIntersection.begin()));
+          it->second.variables = varIntersection;
         } else {
-          // First occurrence - record all co-occurring types
-          coOccurrences[key] = newOccs;
+          // First occurrence - record all co-occurring variables
+          coOccurrences[key].variables = newVars;
         }
         
         // If this is a recursive variable, process its bound
@@ -998,23 +1017,24 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
     
     // Add all primitives
     for (const auto& prim : ty->prims) {
-      newOccs.insert(prim);
+      newPrims.insert(prim);
     }
 
-    // Update co-occurrences again to add primitive types
+    // Update co-occurrences for primitives
     for (const auto& var : ty->vars) {
       if (auto tv = var->getAsTVariable()) {
         PolarVar key{tv->state.get(), pol};
         auto it = coOccurrences.find(key);
         if (it != coOccurrences.end()) {
-          // Compute intersection
-          std::set<SimpleType> intersection;
-          std::set_intersection(it->second.begin(), it->second.end(),
-                               newOccs.begin(), newOccs.end(),
-                               std::inserter(intersection, intersection.begin()));
-          it->second = intersection;
+          // Compute intersection with existing occurrences for primitives
+          std::set<SimpleType> primIntersection;
+          std::set_intersection(it->second.primitives.begin(), it->second.primitives.end(),
+                               newPrims.begin(), newPrims.end(),
+                               std::inserter(primIntersection, primIntersection.begin()));
+          it->second.primitives = primIntersection;
         } else {
-          coOccurrences[key] = newOccs;
+          // First occurrence - record all co-occurring primitives
+          coOccurrences[key].primitives = newPrims;
         }
       }
     }
@@ -1078,16 +1098,12 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
       PolarVar posKey{varPtr, true};
       PolarVar negKey{varPtr, false};
       
-      bool hasPos = false, hasNeg = false;
-      for (const auto& [key, occs] : coOccurrences) {
-        if (key.vs == varPtr) {
-          if (key.pos) hasPos = true;
-          else hasNeg = true;
-        }
-      }
+      bool hasPos = coOccurrences.find(posKey) != coOccurrences.end();
+      bool hasNeg = coOccurrences.find(negKey) != coOccurrences.end();
       
       if ((hasPos && !hasNeg) || (!hasPos && hasNeg)) {
         // Variable only occurs in one polarity - remove it
+        // std::cerr << "Removing variable (only occurs in one polarity): " << "α"  << std::to_string(varPtr->id) << "\n";
         varSubst[varPtr] = std::nullopt;
       }
     }
@@ -1102,33 +1118,34 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
       auto varOccIt = coOccurrences.find(varKey);
       if (varOccIt == coOccurrences.end()) continue;
       
-      const auto& varOccs = varOccIt->second;
+      const auto& varOccData = varOccIt->second;
       
-      for (const auto& coOccType : varOccs) {
-        if (auto coOccVar = coOccType->getAsTVariable()) {
-          VariableState* coOccPtr = coOccVar->state.get();
+      // Check for variable-variable co-occurrence
+      for (const auto& coOccVar : varOccData.variables) {
+        if (auto tv = coOccVar->getAsTVariable()) {
+          VariableState* coOccPtr = tv->state.get();
           
           if (coOccPtr != varPtr && 
               varSubst.find(coOccPtr) == varSubst.end() &&
               (recVars.count(varPtr) > 0) == (recVars.count(coOccPtr) > 0)) {
             
             // Check if coOccVar always co-occurs with varPtr in this polarity
+            std::cerr << "Check if α" << std::to_string(varPtr->id) << " always co-occurs with α" << std::to_string(coOccPtr->id) << "\n";
             PolarVar coOccKey{coOccPtr, pol};
             auto coOccOccIt = coOccurrences.find(coOccKey);
             
             if (coOccOccIt != coOccurrences.end()) {
-              // Check if coOccVar's occurrences include varPtr
-              bool alwaysCoOccurs = true;
-              for (const auto& occType : coOccOccIt->second) {
-                if (auto occVar = occType->getAsTVariable()) {
-                  if (occVar->state.get() == varPtr) {
-                    goto found_var;
+              // Check if coOccVar's variable occurrences include varPtr
+              bool alwaysCoOccurs = coOccOccIt->second.variables.find(varPtr);
+              for (const auto& occVar : ) {
+                if (auto occTv = occVar->getAsTVariable()) {
+                  if (occTv->state.get() == varPtr) {
+                    alwaysCoOccurs = true;
+                    break;
                   }
                 }
               }
-              alwaysCoOccurs = false;
               
-              found_var:
               if (alwaysCoOccurs) {
                 // Unify coOccPtr into varPtr
                 varSubst[coOccPtr] = varPtr;
@@ -1143,20 +1160,23 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
             }
           }
         }
-        // Check for primitive co-occurrence (variable always occurs with a primitive)
-        else if (auto prim = coOccType->getAsTPrimitive()) {
+      }
+      
+      // Check for variable-primitive co-occurrence
+      for (const auto& prim : varOccData.primitives) {
+        if (auto p = prim->getAsTPrimitive()) {
           // Check if variable also occurs in opposite polarity with the same primitive
           PolarVar oppKey{varPtr, !pol};
           auto oppOccIt = coOccurrences.find(oppKey);
           
           if (oppOccIt != coOccurrences.end()) {
-            for (const auto& oppOccType : oppOccIt->second) {
-              if (auto oppPrim = oppOccType->getAsTPrimitive()) {
-                if (oppPrim->name == prim->name) {
+            for (const auto& oppPrim : oppOccIt->second.primitives) {
+              if (auto oppP = oppPrim->getAsTPrimitive()) {
+                if (oppP->name == p->name) {
                   // Variable always occurs with the same primitive in both polarities
                   // Remove the variable
                   varSubst[varPtr] = std::nullopt;
-                  break;
+                  goto next_var; // Break out of all nested loops for this variable
                 }
               }
             }
@@ -1164,6 +1184,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
         }
       }
     }
+    next_var:;
   }
   
   // Step 3: Reconstruct the type with substitutions applied

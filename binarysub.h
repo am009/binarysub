@@ -314,7 +314,11 @@ merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
 std::string toString(const CompactType &ct);
 
 // Co-occurrence analysis data structures
-using OccurrenceMap = std::map<PolarVar, std::set<SimpleType>>;
+struct OccurrenceData {
+  std::set<SimpleType> variables;    // Only variable types
+  std::set<SimpleType> primitives;   // Only primitive types
+};
+using OccurrenceMap = std::map<PolarVar, OccurrenceData>;
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &ty);
 std::string toString(const OccurrenceMap &om);
 
