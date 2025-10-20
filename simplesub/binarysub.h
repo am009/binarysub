@@ -59,6 +59,33 @@ private:
   };
 };
 
+// Specialization for void
+template <typename E> class expected<void, E> {
+public:
+  expected() : has_value_(true) {}
+
+  template <typename U>
+  expected(const unexpected<U> &error)
+      : has_value_(false), error_(error.error()) {}
+
+  bool has_value() const { return has_value_; }
+  operator bool() const { return has_value_; }
+  bool operator!() const { return !has_value_; }
+
+  const E &error() const { return error_; }
+
+private:
+  bool has_value_;
+  E error_;
+};
+
+// ======================= Solver cache & error ==============================
+struct Error {
+  std::string msg;
+  static Error make(std::string m);
+};
+inline Error Error::make(std::string m) { return {std::move(m)}; }
+
 // ======================= Fresh supply & scope levels =======================
 struct VarSupply {
   std::uint32_t next = 0;
@@ -144,33 +171,6 @@ SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields);
 int level_of(const SimpleType &st);
 VariableState *extractVariableState(const SimpleType &st);
 
-// Specialization for void
-template <typename E> class expected<void, E> {
-public:
-  expected() : has_value_(true) {}
-
-  template <typename U>
-  expected(const unexpected<U> &error)
-      : has_value_(false), error_(error.error()) {}
-
-  bool has_value() const { return has_value_; }
-  operator bool() const { return has_value_; }
-  bool operator!() const { return !has_value_; }
-
-  const E &error() const { return error_; }
-
-private:
-  bool has_value_;
-  E error_;
-};
-
-// ======================= Solver cache & error ==============================
-struct Error {
-  std::string msg;
-  static Error make(std::string m);
-};
-inline Error Error::make(std::string m) { return {std::move(m)}; }
-
 using Cache = std::set<std::pair<const TypeNode *, const TypeNode *>>;
 
 // ======================= Extrusion (level-fixing copy) =====================
@@ -198,7 +198,7 @@ expected<void, Error> constrain_impl(const SimpleType &lhs,
                                      const SimpleType &rhs, Cache &cache,
                                      VarSupply &supply);
 
-// ======================= User-facing algebraic types ========================
+// ======================= User-facing types ========================
 
 struct UTop {};
 struct UBot {};
