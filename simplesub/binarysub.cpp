@@ -100,7 +100,6 @@ SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields) {
 }
 
 // compute the max level contained in a type (lazy in paper; direct here)
-// :contentReference[oaicite:3]{index=3}
 int level_of(const SimpleType &st) {
   return std::visit(
       [](auto const &n) -> int {
@@ -247,7 +246,6 @@ expected<void, Error> constrain_impl(const SimpleType &lhs,
       return expected<void, Error>{};
     }
     // else extrude rhs down to lhs.level (negative polarity) and retry
-    // :contentReference[oaicite:6]{index=6}
     std::map<PolarVar, std::shared_ptr<VariableState>> ex;
     auto rhs_ex = extrude(rhs, /*pol=*/false, lv->level, ex, supply);
     return constrain(lhs, rhs_ex, cache, supply);
@@ -262,7 +260,6 @@ expected<void, Error> constrain_impl(const SimpleType &lhs,
       return expected<void, Error>{};
     }
     // else extrude lhs down to rhs.level (positive polarity) and retry
-    // :contentReference[oaicite:7]{index=7}
     std::map<PolarVar, std::shared_ptr<VariableState>> ex;
     auto lhs_ex = extrude(lhs, /*pol=*/true, rv->level, ex, supply);
     return constrain(lhs_ex, rhs, cache, supply);
@@ -396,12 +393,8 @@ TypeScheme generalize(const SimpleType &rhs, int env_level) {
   return PolyScheme{env_level, rhs};
 }
 
-} // namespace binarysub
-
 // =================== Type Simplification Implementation
 // ===========================
-
-namespace binarysub {
 
 // Helper function to get variable ID from type variable names (assumes format
 // "α123")
