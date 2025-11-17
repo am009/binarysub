@@ -71,10 +71,10 @@ int demo_levels() {
   // and similarly for bool on id2.
   Cache cache;
   // id1 is α1→α1
-  auto d1 = id1->getAsTFunctionRef().lhs;
-  auto r1 = id1->getAsTFunctionRef().rhs;
-  auto d2 = id2->getAsTFunctionRef().lhs;
-  auto r2 = id2->getAsTFunctionRef().rhs;
+  auto d1 = id1->getAsTFunctionRef().args.at(0);
+  auto r1 = id1->getAsTFunctionRef().result;
+  auto d2 = id2->getAsTFunctionRef().args.at(0);
+  auto r2 = id2->getAsTFunctionRef().result;
 
   if (auto e = constrain(TInt, d1, cache, supply); !e) {
     std::cerr << e.error().msg << "\n";

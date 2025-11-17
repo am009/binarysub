@@ -115,7 +115,8 @@ struct TPrimitive {
 };
 
 struct TFunction {
-  SimpleType lhs, rhs;
+  std::vector<SimpleType> args;
+  SimpleType result;
 };
 
 struct TRecord {
@@ -164,6 +165,7 @@ template <typename T> constexpr bool isTRecordType();
 SimpleType make_primitive(std::string name);
 SimpleType make_variable(std::uint32_t id, int lvl);
 SimpleType fresh_variable(VarSupply &vs, int lvl);
+SimpleType make_function(std::vector<SimpleType> args, SimpleType result);
 SimpleType make_function(SimpleType a, SimpleType b);
 SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields);
 
@@ -219,7 +221,8 @@ struct UInter {
   UTypePtr lhs, rhs;
 };
 struct UFunctionType {
-  UTypePtr lhs, rhs;
+  std::vector<UTypePtr> args;
+  UTypePtr result;
 };
 struct URecordType {
   std::vector<std::pair<std::string, UTypePtr>> fields;
@@ -258,8 +261,10 @@ inline UTypePtr make_uinter(UTypePtr lhs, UTypePtr rhs) {
   return std::make_shared<UType>(UInter{std::move(lhs), std::move(rhs)});
 }
 
-inline UTypePtr make_ufunctiontype(UTypePtr lhs, UTypePtr rhs) {
-  return std::make_shared<UType>(UFunctionType{std::move(lhs), std::move(rhs)});
+inline UTypePtr
+make_ufunctiontype(std::vector<UTypePtr> args, UTypePtr result) {
+  return std::make_shared<UType>(
+      UFunctionType{std::move(args), std::move(result)});
 }
 
 inline UTypePtr

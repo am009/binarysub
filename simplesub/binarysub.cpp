@@ -89,8 +89,15 @@ SimpleType fresh_variable(VarSupply &vs, int lvl) {
   return make_variable(vs.fresh_id(), lvl);
 }
 
+SimpleType make_function(std::vector<SimpleType> args, SimpleType result) {
+  return std::make_shared<TypeNode>(TFunction{std::move(args),
+                                              std::move(result)});
+}
+
 SimpleType make_function(SimpleType a, SimpleType b) {
-  return std::make_shared<TypeNode>(TFunction{std::move(a), std::move(b)});
+  std::vector<SimpleType> args;
+  args.push_back(std::move(a));
+  return make_function(std::move(args), std::move(b));
 }
 
 SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields) {
@@ -109,7 +116,10 @@ int level_of(const SimpleType &st) {
         } else if constexpr (isVariableStateType<T>()) {
           return n.level;
         } else if constexpr (isTFunctionType<T>()) {
-          return std::max(level_of(n.lhs), level_of(n.rhs));
+          int m = level_of(n.result);
+          for (auto const &arg : n.args)
+            m = std::max(m, level_of(arg));
+          return m;
         } else if constexpr (isTRecordType<T>()) {
           int m = 0;
           for (auto const &[_, t] : n.fields)
@@ -140,9 +150,12 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
     return ty;
 
   if (auto f = ty->getAsTFunction()) {
-    auto l = extrude(f->lhs, !pol, lvl, cache, supply);
-    auto r = extrude(f->rhs, pol, lvl, cache, supply);
-    return make_function(std::move(l), std::move(r));
+    std::vector<SimpleType> newArgs;
+    newArgs.reserve(f->args.size());
+    for (auto const &a : f->args)
+      newArgs.push_back(extrude(a, !pol, lvl, cache, supply));
+    auto r = extrude(f->result, pol, lvl, cache, supply);
+    return make_function(std::move(newArgs), std::move(r));
   }
 
   if (auto r = ty->getAsTRecord()) {
@@ -214,9 +227,15 @@ expected<void, Error> constrain_impl(const SimpleType &lhs,
 
   if (auto lf = lhs->getAsTFunction())
     if (auto rf = rhs->getAsTFunction()) {
-      if (auto e = constrain(rf->lhs, lf->lhs, cache, supply); !e)
-        return e;
-      if (auto e = constrain(lf->rhs, rf->rhs, cache, supply); !e)
+      if (lf->args.size() < rf->args.size()) {
+        return unexpected<Error>(
+            Error::make("function arity mismatch: subtype has fewer params"));
+      }
+      for (size_t i = 0; i < rf->args.size(); ++i) {
+        if (auto e = constrain(rf->args[i], lf->args[i], cache, supply); !e)
+          return e;
+      }
+      if (auto e = constrain(lf->result, rf->result, cache, supply); !e)
         return e;
       return expected<void, Error>{};
     }
@@ -299,9 +318,17 @@ void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence) {
           bool needParens = precedence > 1;
           if (needParens)
             os << "(";
-          printTypeImpl(n.lhs, os, 2);
+          if (n.args.empty()) {
+            os << "()";
+          } else {
+            for (size_t i = 0; i < n.args.size(); ++i) {
+              if (i > 0)
+                os << " × ";
+              printTypeImpl(n.args[i], os, 2);
+            }
+          }
           os << " → ";
-          printTypeImpl(n.rhs, os, 1);
+          printTypeImpl(n.result, os, 1);
           if (needParens)
             os << ")";
         } else if constexpr (std::is_same_v<T, UUnion>) {
@@ -351,9 +378,14 @@ SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
         if constexpr (isTPrimitiveType<T>()) {
           return t;
         } else if constexpr (isTFunctionType<T>()) {
-          return make_function(
-              freshen_above_rec(n.lhs, cutoff, at_level, memo, supply),
-              freshen_above_rec(n.rhs, cutoff, at_level, memo, supply));
+          std::vector<SimpleType> args;
+          args.reserve(n.args.size());
+          for (auto const &a : n.args)
+            args.push_back(
+                freshen_above_rec(a, cutoff, at_level, memo, supply));
+          return make_function(std::move(args),
+                               freshen_above_rec(n.result, cutoff, at_level,
+                                                 memo, supply));
         } else if constexpr (isTRecordType<T>()) {
           std::vector<std::pair<std::string, SimpleType>> fs;
           fs.reserve(n.fields.size());
@@ -647,9 +679,13 @@ UTypePtr coalesceType(const SimpleType &st) {
           if constexpr (isTPrimitiveType<T>()) {
             return make_uprimitivetype(n.name);
           } else if constexpr (isTFunctionType<T>()) {
-            auto lhs = go(n.lhs, !pol, inProcess);
-            auto rhs = go(n.rhs, pol, inProcess);
-            return make_ufunctiontype(lhs, rhs);
+            std::vector<UTypePtr> args;
+            args.reserve(n.args.size());
+            for (const auto &arg : n.args) {
+              args.push_back(go(arg, !pol, inProcess));
+            }
+            auto rhs = go(n.result, pol, inProcess);
+            return make_ufunctiontype(std::move(args), rhs);
           } else if constexpr (isTRecordType<T>()) {
             std::vector<std::pair<std::string, UTypePtr>> fields;
             fields.reserve(n.fields.size());
@@ -757,9 +793,14 @@ CompactTypeScheme compactType(const SimpleType &st) {
           if constexpr (isTPrimitiveType<T>()) {
             return make_compact({}, {ty});
           } else if constexpr (isTFunctionType<T>()) {
-            auto l = go(n.lhs, !pol, {}, inProcess);
-            auto r = go(n.rhs, pol, {}, inProcess);
-            return make_compact({}, {}, std::nullopt, std::make_pair(l, r));
+            auto resCT = go(n.result, pol, {}, inProcess);
+            for (auto it = n.args.rbegin(); it != n.args.rend(); ++it) {
+              auto argCT = go(*it, !pol, {}, inProcess);
+              resCT =
+                  make_compact({}, {}, std::nullopt,
+                               std::make_pair(argCT, resCT));
+            }
+            return resCT;
           } else if constexpr (isTRecordType<T>()) {
             std::map<std::string, std::shared_ptr<CompactType>> fields;
             for (const auto &[name, fieldType] : n.fields) {
@@ -896,9 +937,14 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
           if constexpr (isTPrimitiveType<T>()) {
             return make_compact({}, {ty});
           } else if constexpr (isTFunctionType<T>()) {
-            auto l = go0(n.lhs, !pol);
-            auto r = go0(n.rhs, pol);
-            return make_compact({}, {}, std::nullopt, std::make_pair(l, r));
+            auto resCT = go0(n.result, pol);
+            for (auto it = n.args.rbegin(); it != n.args.rend(); ++it) {
+              auto argCT = go0(*it, !pol);
+              resCT =
+                  make_compact({}, {}, std::nullopt,
+                               std::make_pair(argCT, resCT));
+            }
+            return resCT;
           } else if constexpr (isTRecordType<T>()) {
             std::map<std::string, std::shared_ptr<CompactType>> fields;
             for (const auto &[name, fieldType] : n.fields) {
@@ -1399,9 +1445,17 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty) {
 
     // Add function type
     if (ty->function) {
-      auto lhs = go(ty->function->first, !pol, newInProcess);
-      auto rhs = go(ty->function->second, pol, newInProcess);
-      components.push_back(make_ufunctiontype(lhs, rhs));
+      std::vector<UTypePtr> funArgs;
+      std::set<const CompactType *> seen;
+      auto current = ty;
+      while (current && current->function &&
+             seen.insert(current.get()).second) {
+        funArgs.push_back(
+            go(current->function->first, !pol, newInProcess));
+        current = current->function->second;
+      }
+      auto rhs = go(current ? current : ty, pol, newInProcess);
+      components.push_back(make_ufunctiontype(std::move(funArgs), rhs));
     }
 
     // Combine components based on polarity
