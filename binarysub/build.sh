@@ -1,5 +1,6 @@
 #!/bin/sh
 
-g++-12 -g --std=c++2b ./binarysub.cpp -c -o binarysub.o && \
-g++-12 -g --std=c++2b ./demo.cpp binarysub.o -o binarysub && \
+SOURCES="./binarysub.cpp ./binarysub-core.cpp"
+
+g++-12 -g --std=c++2b -fno-rtti $SOURCES ./demo.cpp -o binarysub && \
 ./binarysub

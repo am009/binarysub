@@ -1,4 +1,6 @@
 #include "binarysub.h"
+#include <numeric>
+#include <functional>
 #include <sstream>
 
 namespace binarysub {

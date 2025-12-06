@@ -1,5 +1,6 @@
 
 #include "binarysub-core.h"
+#include <functional>
 
 namespace binarysub {
 
@@ -90,20 +91,50 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
 // ======================= Subtype constraint solver implementation
 expected<void, Error> constrain_impl(const SimpleType &lhs,
                                      const SimpleType &rhs, Cache &cache,
-                                     VarSupply &supply);
+                                     VarSupply &supply,
+                                     std::function<void(const SimpleType&, const SimpleType&)> AddToWorklist);
 
 expected<void, Error> constrain(const SimpleType &lhs, const SimpleType &rhs,
                                 Cache &cache, VarSupply &supply) {
-  auto key = std::make_pair(lhs.get(), rhs.get());
-  if (cache.find(key) != cache.end())
-    return expected<void, Error>{};
-  cache.insert(key);
-  return constrain_impl(lhs, rhs, cache, supply);
+  // Worklist用于存储待处理的约束对
+  std::vector<std::pair<SimpleType, SimpleType>> worklist;
+  
+  auto AddToWorklist = [&](const SimpleType &l, const SimpleType &r) {
+    // 检查缓存，避免重复添加
+    auto key = std::make_pair(l.get(), r.get());
+    if (cache.find(key) == cache.end()) {
+      worklist.emplace_back(l, r);
+    }
+  };
+
+  // 初始约束加入worklist
+  AddToWorklist(lhs, rhs);
+
+  while (!worklist.empty()) {
+    auto [current_lhs, current_rhs] = worklist.back();
+    worklist.pop_back();
+
+    // 检查缓存，避免重复处理
+    auto key = std::make_pair(current_lhs.get(), current_rhs.get());
+    if (cache.find(key) != cache.end()) {
+      continue;
+    }
+    cache.insert(key);
+
+    // 处理当前约束，将新产生的约束加入worklist
+    if (auto result = constrain_impl(current_lhs, current_rhs, cache, supply, AddToWorklist); !result) {
+      return result;
+    }
+  }
+
+  return expected<void, Error>{};
 }
 
 expected<void, Error> constrain_impl(const SimpleType &lhs,
                                      const SimpleType &rhs, Cache &cache,
-                                     VarSupply &supply) {
+                                     VarSupply &supply,
+                                     std::function<void(const SimpleType&, const SimpleType&)> AddToWorklist) {
+  // 处理基本类型
   if (auto lp = lhs->getAsTPrimitive()) {
     if (auto rp = rhs->getAsTPrimitive()) {
       if (lp->name == rp->name)
@@ -114,21 +145,23 @@ expected<void, Error> constrain_impl(const SimpleType &lhs,
     }
   }
 
+  // 处理函数类型
   if (auto lf = lhs->getAsTFunction())
     if (auto rf = rhs->getAsTFunction()) {
       if (lf->args.size() < rf->args.size()) {
         return unexpected<Error>(
             Error::make("function arity mismatch: subtype has fewer params"));
       }
+      // 将参数约束加入worklist
       for (size_t i = 0; i < rf->args.size(); ++i) {
-        if (auto e = constrain(rf->args[i], lf->args[i], cache, supply); !e)
-          return e;
+        AddToWorklist(rf->args[i], lf->args[i]);
       }
-      if (auto e = constrain(lf->result, rf->result, cache, supply); !e)
-        return e;
+      // 将返回类型约束加入worklist
+      AddToWorklist(lf->result, rf->result);
       return expected<void, Error>{};
     }
 
+  // 处理记录类型
   if (auto lr = lhs->getAsTRecord())
     if (auto rr = rhs->getAsTRecord()) {
       std::map<std::string, SimpleType> fmap;
@@ -138,40 +171,48 @@ expected<void, Error> constrain_impl(const SimpleType &lhs,
         auto it = fmap.find(n_req);
         if (it == fmap.end())
           return unexpected<Error>(Error::make("missing field: " + n_req));
-        if (auto e = constrain(it->second, t_req, cache, supply); !e)
-          return e;
+        // 将字段约束加入worklist
+        AddToWorklist(it->second, t_req);
       }
       return expected<void, Error>{};
     }
 
+  // 处理左侧是变量的情况
   if (auto lv = lhs->getAsVariableState()) {
     // guard: only allow rhs to flow into α if rhs.level <= α.level
     if (level_of(rhs) <= lv->level) {
       lv->upperBounds.push_back(rhs);
-      for (auto const &lb : lv->lowerBounds)
-        if (auto e = constrain(lb, rhs, cache, supply); !e)
-          return e;
+      // 将新产生的约束加入worklist
+      for (auto const &lb : lv->lowerBounds) {
+        AddToWorklist(lb, rhs);
+      }
       return expected<void, Error>{};
     }
     // else extrude rhs down to lhs.level (negative polarity) and retry
     // make a copy of the problematic type such that the copy has the requested level and soundly approximates the original type.
     std::map<PolarVar, std::shared_ptr<VariableState>> ex;
     auto rhs_ex = extrude(rhs, /*pol=*/false, lv->level, ex, supply);
-    return constrain(lhs, rhs_ex, cache, supply);
+    // 将extrude后的约束加入worklist
+    AddToWorklist(lhs, rhs_ex);
+    return expected<void, Error>{};
   }
 
+  // 处理右侧是变量的情况
   if (auto rv = rhs->getAsVariableState()) {
     if (level_of(lhs) <= rv->level) {
       rv->lowerBounds.push_back(lhs);
-      for (auto const &ub : rv->upperBounds)
-        if (auto e = constrain(lhs, ub, cache, supply); !e)
-          return e;
+      // 将新产生的约束加入worklist
+      for (auto const &ub : rv->upperBounds) {
+        AddToWorklist(lhs, ub);
+      }
       return expected<void, Error>{};
     }
     // else extrude lhs down to rhs.level (positive polarity) and retry
     std::map<PolarVar, std::shared_ptr<VariableState>> ex;
     auto lhs_ex = extrude(lhs, /*pol=*/true, rv->level, ex, supply);
-    return constrain(lhs_ex, rhs, cache, supply);
+    // 将extrude后的约束加入worklist
+    AddToWorklist(lhs_ex, rhs);
+    return expected<void, Error>{};
   }
 
   return unexpected<Error>(Error::make("cannot constrain given pair"));
