@@ -10,7 +10,8 @@
             "name": "Debug",
             "program": "${workspaceFolder}/build/binarysub",
             "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "run build.sh"
         }
     ]
 }

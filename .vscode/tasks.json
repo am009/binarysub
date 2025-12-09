@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "run build.sh",
+      "type": "shell",
+      "command": "${workspaceFolder}/build.sh",
+      "args": []
+    },
+  ]
+}
