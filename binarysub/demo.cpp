@@ -53,8 +53,7 @@ void printTypeForExpr(const char* str) {
     assert(false && "Type error in test!!");
   }
   auto typer = Typer();
-  Ctx ctx;
-  auto tyRes = typer.inferType(term1.value(), ctx, 0);
+  auto tyRes = typer.inferType(term1.value(), typer.getBuiltins(), 0);
   if (!tyRes) {
     std::cout << __FILE__ << ":" << __LINE__ << ": ";
     std::cout << tyRes.error().msg << "\n";

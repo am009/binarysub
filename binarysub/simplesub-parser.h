@@ -60,6 +60,14 @@ struct Term {
   explicit Term(Rcd rcd) : v(std::move(rcd)) {}
   explicit Term(Sel sel) : v(std::move(sel)) {}
   explicit Term(Let let) : v(std::move(let)) {}
+
+  template <typename T> T *getAs() {
+    return std::get_if<T>(&v);
+  }
+
+  template <typename T> const T *getAs() const {
+    return std::get_if<T>(&v);
+  }
 };
 
 // Helper functions to create Term instances
@@ -87,7 +95,8 @@ inline TermPtr make_sel(TermPtr receiver, std::string fieldName) {
   return std::make_shared<Term>(Sel{std::move(receiver), std::move(fieldName)});
 }
 
-inline TermPtr make_let(bool isRec, std::string name, TermPtr rhs, TermPtr body) {
+inline TermPtr make_let(bool isRec, std::string name, TermPtr rhs,
+                        TermPtr body) {
   return std::make_shared<Term>(
       Let{isRec, std::move(name), std::move(rhs), std::move(body)});
 }
@@ -100,7 +109,8 @@ struct Pgrm {
 // ======================= Parser Result Types ========================
 
 template <typename T>
-using ParseResultT = std::pair<std::string, binarysub::expected<T, binarysub::Error>>;
+using ParseResultT =
+    std::pair<std::string, binarysub::expected<T, binarysub::Error>>;
 
 // ======================= Parser Functions ========================
 

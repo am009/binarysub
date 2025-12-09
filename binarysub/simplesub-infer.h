@@ -35,6 +35,14 @@ struct TypeScheme {
 
   // Instantiate the type scheme at a given level
   binarysub::SimpleType instantiate(int lvl, binarysub::VarSupply& supply);
+
+  template <typename T> T *getAs() {
+    return std::get_if<T>(&v);
+  }
+
+  template <typename T> const T *getAs() const {
+    return std::get_if<T>(&v);
+  }
 };
 
 // ======================= Typer Context ========================

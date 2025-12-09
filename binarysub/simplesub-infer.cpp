@@ -8,21 +8,17 @@ namespace simplesub {
 
 binarysub::SimpleType TypeScheme::instantiate(int lvl,
                                               binarysub::VarSupply &supply) {
-  return std::visit(
-      [&](auto &&arg) -> binarysub::SimpleType {
-        using T = std::decay_t<decltype(arg)>;
-        if constexpr (std::is_same_v<T, binarysub::SimpleType>) {
-          return arg;
-        } else if constexpr (std::is_same_v<T, PolymorphicType>) {
-          // For PolymorphicType, we need to freshen variables above the
-          // polymorphic level This is handled by the Typer's freshenAbove
-          // method
-          return arg.body;
-        } else {
-          static_assert(!sizeof(T), "Unhandled TypeScheme variant");
-        }
-      },
-      v);
+  if (auto *st = std::get_if<binarysub::SimpleType>(&v)) {
+    return *st;
+  } else if (auto *pt = std::get_if<PolymorphicType>(&v)) {
+    // For PolymorphicType, we need to freshen variables above the
+    // polymorphic level This is handled by the Typer's freshenAbove
+    // method
+    return pt->body;
+  } else {
+    assert(false && "Unhandled TypeScheme variant");
+    return binarysub::SimpleType(); // unreachable
+  }
 }
 
 // ======================= Typer Implementation ========================
@@ -122,51 +118,43 @@ Typer::freshenAbove(int lim, const binarysub::SimpleType &ty, int lvl) {
       return t;
     }
 
-    return std::visit(
-        [&](auto &&arg) -> binarysub::SimpleType {
-          using T = std::decay_t<decltype(arg)>;
-          if (t->isVariableState()) {
-            auto *vs = t->getAsVariableState();
-            auto it = freshened.find(vs);
-            if (it != freshened.end()) {
-              return it->second;
-            }
+    if (auto *vs = t->getAsVariableState()) {
+      auto it = freshened.find(vs);
+      if (it != freshened.end()) {
+        return it->second;
+      }
 
-            auto v = binarysub::fresh_variable(supply, lvl);
-            freshened[vs] = v;
+      auto v = binarysub::fresh_variable(supply, lvl);
+      freshened[vs] = v;
 
-            auto *new_vs = v->getAsVariableState();
-            for (const auto &lb : vs->lowerBounds) {
-              new_vs->lowerBounds.push_back(freshen(lb));
-            }
-            for (const auto &ub : vs->upperBounds) {
-              new_vs->upperBounds.push_back(freshen(ub));
-            }
+      auto *new_vs = v->getAsVariableState();
+      for (const auto &lb : vs->lowerBounds) {
+        new_vs->lowerBounds.push_back(freshen(lb));
+      }
+      for (const auto &ub : vs->upperBounds) {
+        new_vs->upperBounds.push_back(freshen(ub));
+      }
 
-            return v;
-          } else if (t->isTFunction()) {
-            auto *func = t->getAsTFunction();
-            std::vector<binarysub::SimpleType> new_args;
-            for (const auto &arg : func->args) {
-              new_args.push_back(freshen(arg));
-            }
-            return binarysub::make_function(std::move(new_args),
-                                            freshen(func->result));
-          } else if (t->isTRecord()) {
-            auto *rec = t->getAsTRecord();
-            std::vector<std::pair<std::string, binarysub::SimpleType>>
-                new_fields;
-            for (const auto &field : rec->fields) {
-              new_fields.push_back({field.first, freshen(field.second)});
-            }
-            return binarysub::make_record(std::move(new_fields));
-          } else if (t->isTPrimitive()) {
-            return t;
-          } else {
-            assert(false && "Unhandled SimpleType variant in freshenAbove");
-          }
-        },
-        ty->v);
+      return v;
+    } else if (auto *func = t->getAsTFunction()) {
+      std::vector<binarysub::SimpleType> new_args;
+      for (const auto &arg : func->args) {
+        new_args.push_back(freshen(arg));
+      }
+      return binarysub::make_function(std::move(new_args),
+                                      freshen(func->result));
+    } else if (auto *rec = t->getAsTRecord()) {
+      std::vector<std::pair<std::string, binarysub::SimpleType>> new_fields;
+      for (const auto &field : rec->fields) {
+        new_fields.push_back({field.first, freshen(field.second)});
+      }
+      return binarysub::make_record(std::move(new_fields));
+    } else if (t->getAsTPrimitive()) {
+      return t;
+    } else {
+      assert(false && "Unhandled SimpleType variant in freshenAbove");
+      return binarysub::SimpleType(); // unreachable
+    }
   };
 
   return freshen(ty);
@@ -174,130 +162,122 @@ Typer::freshenAbove(int lim, const binarysub::SimpleType &ty, int lvl) {
 
 binarysub::expected<binarysub::SimpleType, binarysub::Error>
 Typer::typeTerm(const TermPtr &term, const Ctx &ctx, int lvl) {
-  return std::visit(
-      [&](auto &&arg)
-          -> binarysub::expected<binarysub::SimpleType, binarysub::Error> {
-        using T = std::decay_t<decltype(arg)>;
+  if (auto *var = std::get_if<Var>(&term->v)) {
+    // Variable lookup
+    auto it = ctx.find(var->name);
+    if (it == ctx.end()) {
+      return binarysub::make_unexpected(
+          binarysub::Error::make("identifier not found: " + var->name));
+    }
 
-        if constexpr (std::is_same_v<T, Var>) {
-          // Variable lookup
-          auto it = ctx.find(arg.name);
-          if (it == ctx.end()) {
-            return binarysub::make_unexpected(
-                binarysub::Error::make("identifier not found: " + arg.name));
-          }
+    // Instantiate the type scheme
+    auto &scheme = it->second;
+    if (auto *st = std::get_if<binarysub::SimpleType>(&scheme->v)) {
+      return *st;
+    } else if (auto *pt = std::get_if<PolymorphicType>(&scheme->v)) {
+      return freshenAbove(pt->level, pt->body, lvl);
+    } else {
+      assert(false && "Unhandled TypeScheme variant");
+      return binarysub::make_unexpected(
+          binarysub::Error::make("Unhandled TypeScheme variant"));
+    }
 
-          // Instantiate the type scheme
-          auto &scheme = it->second;
-          return std::visit(
-              [&](auto &&scheme_arg) -> binarysub::SimpleType {
-                using ST = std::decay_t<decltype(scheme_arg)>;
-                if constexpr (std::is_same_v<ST, binarysub::SimpleType>) {
-                  return scheme_arg;
-                } else if constexpr (std::is_same_v<ST, PolymorphicType>) {
-                  return freshenAbove(scheme_arg.level, scheme_arg.body, lvl);
-                } else {
-                  static_assert(!sizeof(ST), "Unhandled TypeScheme variant");
-                }
-              },
-              scheme->v);
+  } else if (auto *lam = std::get_if<Lam>(&term->v)) {
+    // Lambda: fun name -> body
+    auto param = binarysub::fresh_variable(supply, lvl);
+    Ctx new_ctx = ctx;
+    new_ctx[lam->name] = TypeScheme(param);
 
-        } else if constexpr (std::is_same_v<T, Lam>) {
-          // Lambda: fun name -> body
-          auto param = binarysub::fresh_variable(supply, lvl);
-          Ctx new_ctx = ctx;
-          new_ctx[arg.name] = TypeScheme(param);
+    auto body_ty_result = typeTerm(lam->rhs, new_ctx, lvl);
+    if (!body_ty_result.has_value()) {
+      return binarysub::make_unexpected(body_ty_result.error());
+    }
 
-          auto body_ty_result = typeTerm(arg.rhs, new_ctx, lvl);
-          if (!body_ty_result.has_value()) {
-            return binarysub::make_unexpected(body_ty_result.error());
-          }
+    return binarysub::make_function(param, body_ty_result.value());
 
-          return binarysub::make_function(param, body_ty_result.value());
+  } else if (auto *app = std::get_if<App>(&term->v)) {
+    // Application: f a
+    auto f_ty_result = typeTerm(app->lhs, ctx, lvl);
+    if (!f_ty_result.has_value()) {
+      return binarysub::make_unexpected(f_ty_result.error());
+    }
 
-        } else if constexpr (std::is_same_v<T, App>) {
-          // Application: f a
-          auto f_ty_result = typeTerm(arg.lhs, ctx, lvl);
-          if (!f_ty_result.has_value()) {
-            return binarysub::make_unexpected(f_ty_result.error());
-          }
+    auto a_ty_result = typeTerm(app->rhs, ctx, lvl);
+    if (!a_ty_result.has_value()) {
+      return binarysub::make_unexpected(a_ty_result.error());
+    }
 
-          auto a_ty_result = typeTerm(arg.rhs, ctx, lvl);
-          if (!a_ty_result.has_value()) {
-            return binarysub::make_unexpected(a_ty_result.error());
-          }
+    auto res = binarysub::fresh_variable(supply, lvl);
+    auto f_ty = f_ty_result.value();
+    auto a_ty = a_ty_result.value();
 
-          auto res = binarysub::fresh_variable(supply, lvl);
-          auto f_ty = f_ty_result.value();
-          auto a_ty = a_ty_result.value();
+    binarysub::Cache cache;
+    auto constrain_result = binarysub::constrain(
+        f_ty, binarysub::make_function(a_ty, res), cache, supply);
 
-          binarysub::Cache cache;
-          auto constrain_result = binarysub::constrain(
-              f_ty, binarysub::make_function(a_ty, res), cache, supply);
+    if (!constrain_result.has_value()) {
+      return binarysub::make_unexpected(constrain_result.error());
+    }
 
-          if (!constrain_result.has_value()) {
-            return binarysub::make_unexpected(constrain_result.error());
-          }
+    return res;
 
-          return res;
+  } else if (auto *lit = std::get_if<Lit>(&term->v)) {
+    // Integer literal
+    return binarysub::make_primitive("int");
 
-        } else if constexpr (std::is_same_v<T, Lit>) {
-          // Integer literal
-          return binarysub::make_primitive("int");
+  } else if (auto *sel = std::get_if<Sel>(&term->v)) {
+    // Field selection: obj.name
+    auto obj_ty_result = typeTerm(sel->receiver, ctx, lvl);
+    if (!obj_ty_result.has_value()) {
+      return binarysub::make_unexpected(obj_ty_result.error());
+    }
 
-        } else if constexpr (std::is_same_v<T, Sel>) {
-          // Field selection: obj.name
-          auto obj_ty_result = typeTerm(arg.receiver, ctx, lvl);
-          if (!obj_ty_result.has_value()) {
-            return binarysub::make_unexpected(obj_ty_result.error());
-          }
+    auto res = binarysub::fresh_variable(supply, lvl);
+    std::vector<std::pair<std::string, binarysub::SimpleType>> fields;
+    fields.push_back({sel->fieldName, res});
 
-          auto res = binarysub::fresh_variable(supply, lvl);
-          std::vector<std::pair<std::string, binarysub::SimpleType>> fields;
-          fields.push_back({arg.fieldName, res});
+    binarysub::Cache cache;
+    auto constrain_result = binarysub::constrain(
+        obj_ty_result.value(), binarysub::make_record(std::move(fields)), cache,
+        supply);
 
-          binarysub::Cache cache;
-          auto constrain_result = binarysub::constrain(
-              obj_ty_result.value(), binarysub::make_record(std::move(fields)),
-              cache, supply);
+    if (!constrain_result.has_value()) {
+      return binarysub::make_unexpected(constrain_result.error());
+    }
 
-          if (!constrain_result.has_value()) {
-            return binarysub::make_unexpected(constrain_result.error());
-          }
+    return res;
 
-          return res;
+  } else if (auto *rcd = std::get_if<Rcd>(&term->v)) {
+    // Record: {f1: t1, f2: t2, ...}
+    std::vector<std::pair<std::string, binarysub::SimpleType>> fields;
 
-        } else if constexpr (std::is_same_v<T, Rcd>) {
-          // Record: {f1: t1, f2: t2, ...}
-          std::vector<std::pair<std::string, binarysub::SimpleType>> fields;
+    for (const auto &field : rcd->fields) {
+      auto field_ty_result = typeTerm(field.second, ctx, lvl);
+      if (!field_ty_result.has_value()) {
+        return binarysub::make_unexpected(field_ty_result.error());
+      }
+      fields.push_back({field.first, field_ty_result.value()});
+    }
 
-          for (const auto &field : arg.fields) {
-            auto field_ty_result = typeTerm(field.second, ctx, lvl);
-            if (!field_ty_result.has_value()) {
-              return binarysub::make_unexpected(field_ty_result.error());
-            }
-            fields.push_back({field.first, field_ty_result.value()});
-          }
+    return binarysub::make_record(std::move(fields));
 
-          return binarysub::make_record(std::move(fields));
+  } else if (auto *let = std::get_if<Let>(&term->v)) {
+    // Let binding: let name = rhs in body
+    auto n_ty_result = typeLetRhs(let->isRec, let->name, let->rhs, ctx, lvl);
+    if (!n_ty_result.has_value()) {
+      return binarysub::make_unexpected(n_ty_result.error());
+    }
 
-        } else if constexpr (std::is_same_v<T, Let>) {
-          // Let binding: let name = rhs in body
-          auto n_ty_result = typeLetRhs(arg.isRec, arg.name, arg.rhs, ctx, lvl);
-          if (!n_ty_result.has_value()) {
-            return binarysub::make_unexpected(n_ty_result.error());
-          }
+    Ctx new_ctx = ctx;
+    new_ctx[let->name] = TypeScheme(n_ty_result.value());
 
-          Ctx new_ctx = ctx;
-          new_ctx[arg.name] = TypeScheme(n_ty_result.value());
+    return typeTerm(let->body, new_ctx, lvl);
 
-          return typeTerm(arg.body, new_ctx, lvl);
-
-        } else {
-          static_assert(!sizeof(T), "Unhandled Term variant in typeTerm");
-        }
-      },
-      term->v);
+  } else {
+    assert(false && "Unhandled Term variant in typeTerm");
+    return binarysub::make_unexpected(
+        binarysub::Error::make("Unhandled Term variant"));
+  }
 }
 
 } // namespace simplesub
