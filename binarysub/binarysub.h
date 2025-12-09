@@ -1,8 +1,8 @@
 #ifndef BINARYSUB_H
 #define BINARYSUB_H
 
-#include "binarysub-utils.h"
 #include "binarysub-core.h"
+#include "binarysub-utils.h"
 
 #include <cassert>
 #include <iostream>
@@ -13,6 +13,8 @@
 
 namespace binarysub {
 
+std::string fresh_var_name();
+std::string var_id_to_name(std::uint32_t id);
 
 // ======================= User-facing types ========================
 
@@ -102,6 +104,9 @@ inline UTypePtr make_uprimitivetype(std::string name) {
 // Pretty printing
 std::string printType(const UTypePtr &ty);
 void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence = 0);
+
+// Normalize variable names to 'a, 'b, 'c, etc. in order of appearance
+UTypePtr normalizeVariableNames(const UTypePtr &ty);
 
 // =================== Type Simplification ===========================
 
