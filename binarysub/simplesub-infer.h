@@ -5,6 +5,7 @@
 #include "binarysub-utils.h"
 #include "simplesub-parser.h"
 #include <map>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -38,7 +39,7 @@ struct TypeScheme {
 
 // ======================= Typer Context ========================
 
-using Ctx = std::map<std::string, TypeScheme>;
+using Ctx = std::map<std::string, std::optional<TypeScheme>>;
 
 // ======================= Typer Class ========================
 

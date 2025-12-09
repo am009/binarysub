@@ -6,28 +6,23 @@ namespace binarysub {
 
 // compute the max level contained in a type (lazy in paper; direct here)
 int level_of(const SimpleType &st) {
-  return std::visit(
-      [](auto const &n) -> int {
-        using T = std::decay_t<decltype(n)>;
-        if constexpr (isTPrimitiveType<T>()) {
-          return 0;
-        } else if constexpr (isVariableStateType<T>()) {
-          return n.level;
-        } else if constexpr (isTFunctionType<T>()) {
-          int m = level_of(n.result);
-          for (auto const &arg : n.args)
-            m = std::max(m, level_of(arg));
-          return m;
-        } else if constexpr (isTRecordType<T>()) {
-          int m = 0;
-          for (auto const &[_, t] : n.fields)
-            m = std::max(m, level_of(t));
-          return m;
-        } else {
-          static_assert(!sizeof(T), "Unhandled variant type in level_of");
-        }
-      },
-      st->v);
+  if (st->isTPrimitive()) {
+    return 0;
+  } else if (auto n = st->getAsVariableState()) {
+    return n->level;
+  } else if (auto n = st->getAsTFunction()) {
+    int m = level_of(n->result);
+    for (auto const &arg : n->args)
+      m = std::max(m, level_of(arg));
+    return m;
+  } else if (auto n = st->getAsTRecord()) {
+    int m = 0;
+    for (auto const &[_, t] : n->fields)
+      m = std::max(m, level_of(t));
+    return m;
+  } else {
+    assert(false && "Unhandled variant type in level_of");
+  }
 }
 
 // ======================= Extrusion implementation =====================
@@ -89,16 +84,16 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
 }
 
 // ======================= Subtype constraint solver implementation
-expected<void, Error> constrain_impl(const SimpleType &lhs,
-                                     const SimpleType &rhs, Cache &cache,
-                                     VarSupply &supply,
-                                     std::function<void(const SimpleType&, const SimpleType&)> AddToWorklist);
+expected<void, Error> constrain_impl(
+    const SimpleType &lhs, const SimpleType &rhs, Cache &cache,
+    VarSupply &supply,
+    std::function<void(const SimpleType &, const SimpleType &)> AddToWorklist);
 
 expected<void, Error> constrain(const SimpleType &lhs, const SimpleType &rhs,
                                 Cache &cache, VarSupply &supply) {
   // Worklist用于存储待处理的约束对
   std::vector<std::pair<SimpleType, SimpleType>> worklist;
-  
+
   auto AddToWorklist = [&](const SimpleType &l, const SimpleType &r) {
     // 检查缓存，避免重复添加
     auto key = std::make_pair(l.get(), r.get());
@@ -122,7 +117,9 @@ expected<void, Error> constrain(const SimpleType &lhs, const SimpleType &rhs,
     cache.insert(key);
 
     // 处理当前约束，将新产生的约束加入worklist
-    if (auto result = constrain_impl(current_lhs, current_rhs, cache, supply, AddToWorklist); !result) {
+    if (auto result = constrain_impl(current_lhs, current_rhs, cache, supply,
+                                     AddToWorklist);
+        !result) {
       return result;
     }
   }
@@ -130,10 +127,10 @@ expected<void, Error> constrain(const SimpleType &lhs, const SimpleType &rhs,
   return expected<void, Error>{};
 }
 
-expected<void, Error> constrain_impl(const SimpleType &lhs,
-                                     const SimpleType &rhs, Cache &cache,
-                                     VarSupply &supply,
-                                     std::function<void(const SimpleType&, const SimpleType&)> AddToWorklist) {
+expected<void, Error> constrain_impl(
+    const SimpleType &lhs, const SimpleType &rhs, Cache &cache,
+    VarSupply &supply,
+    std::function<void(const SimpleType &, const SimpleType &)> AddToWorklist) {
   // 处理基本类型
   if (auto lp = lhs->getAsTPrimitive()) {
     if (auto rp = rhs->getAsTPrimitive()) {
@@ -189,7 +186,8 @@ expected<void, Error> constrain_impl(const SimpleType &lhs,
       return expected<void, Error>{};
     }
     // else extrude rhs down to lhs.level (negative polarity) and retry
-    // make a copy of the problematic type such that the copy has the requested level and soundly approximates the original type.
+    // make a copy of the problematic type such that the copy has the requested
+    // level and soundly approximates the original type.
     std::map<PolarVar, std::shared_ptr<VariableState>> ex;
     auto rhs_ex = extrude(rhs, /*pol=*/false, lv->level, ex, supply);
     // 将extrude后的约束加入worklist

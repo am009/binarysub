@@ -1,5 +1,4 @@
 #include "simplesub-parser.h"
-#include <algorithm>
 #include <cctype>
 #include <set>
 
@@ -425,6 +424,7 @@ ParseResultT<TermPtr> parseApps(const std::string &str) {
     // Check for keywords
     bool isKw = false;
     for (const auto &kw : keywords) {
+      if (kw == "true" || kw == "false") continue;
       if (peek.size() >= kw.size() && peek.substr(0, kw.size()) == kw) {
         if (peek.size() == kw.size() ||
             (!isLetter(peek[kw.size()]) && !isDigit(peek[kw.size()]) &&
@@ -480,7 +480,7 @@ ParseResultT<TermPtr> parseTerm(const std::string &str) {
     }
   }
 
-  // Default to apps
+  // Default to expr or apps
   return parseApps(str);
 }
 

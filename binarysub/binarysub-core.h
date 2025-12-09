@@ -84,23 +84,6 @@ struct TypeNode {
   bool isTRecord() const { return std::holds_alternative<TRecord>(v); }
 };
 
-// Helper functions for type checking variant types directly
-template <typename T> constexpr bool isTPrimitiveType() {
-  return std::is_same_v<std::decay_t<T>, TPrimitive>;
-}
-
-template <typename T> constexpr bool isVariableStateType() {
-  return std::is_same_v<std::decay_t<T>, VariableState>;
-}
-
-template <typename T> constexpr bool isTFunctionType() {
-  return std::is_same_v<std::decay_t<T>, TFunction>;
-}
-
-template <typename T> constexpr bool isTRecordType() {
-  return std::is_same_v<std::decay_t<T>, TRecord>;
-}
-
 // Type creation functions
 
 // Type creation functions

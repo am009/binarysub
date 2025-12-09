@@ -90,44 +90,38 @@ void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence) {
 SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
                              std::map<SimpleType, SimpleType> &memo,
                              VarSupply &supply) {
-  return std::visit(
-      [&](auto const &n) -> SimpleType {
-        using T = std::decay_t<decltype(n)>;
-        if constexpr (isTPrimitiveType<T>()) {
-          return t;
-        } else if constexpr (isTFunctionType<T>()) {
-          std::vector<SimpleType> args;
-          args.reserve(n.args.size());
-          for (auto const &a : n.args)
-            args.push_back(
-                freshen_above_rec(a, cutoff, at_level, memo, supply));
-          return make_function(
-              std::move(args),
-              freshen_above_rec(n.result, cutoff, at_level, memo, supply));
-        } else if constexpr (isTRecordType<T>()) {
-          std::vector<std::pair<std::string, SimpleType>> fs;
-          fs.reserve(n.fields.size());
-          for (auto const &[name, sub] : n.fields)
-            fs.emplace_back(
-                name, freshen_above_rec(sub, cutoff, at_level, memo, supply));
-          return make_record(std::move(fs));
-        } else if constexpr (isVariableStateType<T>()) {
-          // VariableState
-          if (n.level > cutoff) {
-            if (auto it = memo.find(t); it != memo.end())
-              return it->second;
-            auto fresh =
-                fresh_variable(supply, at_level); // empty bounds, new id/level
-            memo.emplace(t, fresh);
-            return fresh;
-          }
-          return t;
-        } else {
-          static_assert(!sizeof(T),
-                        "Unhandled variant type in freshen_above_rec");
-        }
-      },
-      t->v);
+  if (t->isTPrimitive()) {
+    return t;
+  } else if (auto n = t->getAsTFunction()) {
+    std::vector<SimpleType> args;
+    args.reserve(n->args.size());
+    for (auto const &a : n->args)
+      args.push_back(
+          freshen_above_rec(a, cutoff, at_level, memo, supply));
+    return make_function(
+        std::move(args),
+        freshen_above_rec(n->result, cutoff, at_level, memo, supply));
+  } else if (auto n = t->getAsTRecord()) {
+    std::vector<std::pair<std::string, SimpleType>> fs;
+    fs.reserve(n->fields.size());
+    for (auto const &[name, sub] : n->fields)
+      fs.emplace_back(
+          name, freshen_above_rec(sub, cutoff, at_level, memo, supply));
+    return make_record(std::move(fs));
+  } else if (auto n = t->getAsVariableState()) {
+    // VariableState
+    if (n->level > cutoff) {
+      if (auto it = memo.find(t); it != memo.end())
+        return it->second;
+      auto fresh =
+          fresh_variable(supply, at_level); // empty bounds, new id/level
+      memo.emplace(t, fresh);
+      return fresh;
+    }
+    return t;
+  } else {
+    assert(false && "Unhandled variant type in freshen_above_rec");
+  }
 }
 
 SimpleType instantiate(const TypeScheme &sch, int at_level, VarSupply &supply) {
@@ -390,83 +384,77 @@ UTypePtr coalesceType(const SimpleType &st) {
       go = [&](const SimpleType &ty, bool pol,
                std::set<std::pair<SimpleType, bool>, PairComparator> &inProcess)
       -> UTypePtr {
-    return std::visit(
-        [&](auto const &n) -> UTypePtr {
-          using T = std::decay_t<decltype(n)>;
+    if (auto n = ty->getAsTPrimitive()) {
+      return make_uprimitivetype(n->name);
+    } else if (auto n = ty->getAsTFunction()) {
+      std::vector<UTypePtr> args;
+      args.reserve(n->args.size());
+      for (const auto &arg : n->args) {
+        args.push_back(go(arg, !pol, inProcess));
+      }
+      auto rhs = go(n->result, pol, inProcess);
+      return make_ufunctiontype(std::move(args), rhs);
+    } else if (auto n = ty->getAsTRecord()) {
+      std::vector<std::pair<std::string, UTypePtr>> fields;
+      fields.reserve(n->fields.size());
+      for (const auto &[name, fieldType] : n->fields) {
+        fields.emplace_back(name, go(fieldType, pol, inProcess));
+      }
+      return make_urecordtype(std::move(fields));
+    } else if (auto n = ty->getAsVariableState()) {
+      auto key = std::make_pair(ty, pol);
 
-          if constexpr (isTPrimitiveType<T>()) {
-            return make_uprimitivetype(n.name);
-          } else if constexpr (isTFunctionType<T>()) {
-            std::vector<UTypePtr> args;
-            args.reserve(n.args.size());
-            for (const auto &arg : n.args) {
-              args.push_back(go(arg, !pol, inProcess));
-            }
-            auto rhs = go(n.result, pol, inProcess);
-            return make_ufunctiontype(std::move(args), rhs);
-          } else if constexpr (isTRecordType<T>()) {
-            std::vector<std::pair<std::string, UTypePtr>> fields;
-            fields.reserve(n.fields.size());
-            for (const auto &[name, fieldType] : n.fields) {
-              fields.emplace_back(name, go(fieldType, pol, inProcess));
-            }
-            return make_urecordtype(std::move(fields));
-          } else if constexpr (isVariableStateType<T>()) {
-            auto key = std::make_pair(ty, pol);
+      if (inProcess.count(key)) {
+        // Recursive case - create or reuse recursive variable
+        auto it = recursive.find(key);
+        if (it == recursive.end()) {
+          std::string recName = "μ" + std::to_string(recVarCounter++);
+          recursive[key] = recName;
+          return make_utypevariable(recName);
+        } else {
+          return make_utypevariable(it->second);
+        }
+      } else {
+        auto newInProcess = inProcess;
+        newInProcess.insert(key);
 
-            if (inProcess.count(key)) {
-              // Recursive case - create or reuse recursive variable
-              auto it = recursive.find(key);
-              if (it == recursive.end()) {
-                std::string recName = "μ" + std::to_string(recVarCounter++);
-                recursive[key] = recName;
-                return make_utypevariable(recName);
-              } else {
-                return make_utypevariable(it->second);
-              }
-            } else {
-              auto newInProcess = inProcess;
-              newInProcess.insert(key);
+        // Collect bounds
+        const auto &bounds = pol ? n->lowerBounds : n->upperBounds;
 
-              // Collect bounds
-              const auto &bounds = pol ? n.lowerBounds : n.upperBounds;
+        if (bounds.empty()) {
+          // No bounds - just return a type variable
+          return make_utypevariable("α" + std::to_string(n->id));
+        }
 
-              if (bounds.empty()) {
-                // No bounds - just return a type variable
-                return make_utypevariable("α" + std::to_string(n.id));
-              }
-
-              // Merge all bounds based on polarity
-              UTypePtr result = nullptr;
-              for (const auto &bound : bounds) {
-                auto boundType = go(bound, pol, newInProcess);
-                if (!result) {
-                  result = boundType;
-                } else {
-                  if (pol) {
-                    // Positive: union
-                    result = make_uunion(result, boundType);
-                  } else {
-                    // Negative: intersection
-                    result = make_uinter(result, boundType);
-                  }
-                }
-              }
-
-              // Check if we created a recursive variable
-              auto recIt = recursive.find(key);
-              if (recIt != recursive.end()) {
-                return make_urecursivetype(recIt->second, result);
-              } else {
-                return result ? result
-                              : make_utypevariable("α" + std::to_string(n.id));
-              }
-            }
+        // Merge all bounds based on polarity
+        UTypePtr result = nullptr;
+        for (const auto &bound : bounds) {
+          auto boundType = go(bound, pol, newInProcess);
+          if (!result) {
+            result = boundType;
           } else {
-            static_assert(!sizeof(T), "Unhandled variant type in coalesceType");
+            if (pol) {
+              // Positive: union
+              result = make_uunion(result, boundType);
+            } else {
+              // Negative: intersection
+              result = make_uinter(result, boundType);
+            }
           }
-        },
-        ty->v);
+        }
+
+        // Check if we created a recursive variable
+        auto recIt = recursive.find(key);
+        if (recIt != recursive.end()) {
+          return make_urecursivetype(recIt->second, result);
+        } else {
+          return result ? result
+                        : make_utypevariable("α" + std::to_string(n->id));
+        }
+      }
+    } else {
+      assert(false && "Unhandled variant type in coalesceType");
+    }
   };
 
   std::set<std::pair<SimpleType, bool>, PairComparator> inProcess;
@@ -504,78 +492,72 @@ CompactTypeScheme compactType(const SimpleType &st) {
       go = [&](const SimpleType &ty, bool pol,
                std::set<std::shared_ptr<VariableState>> parents,
                std::set<PolarVar> &inProcess) -> std::shared_ptr<CompactType> {
-    return std::visit(
-        [&](auto const &n) -> std::shared_ptr<CompactType> {
-          using T = std::decay_t<decltype(n)>;
+    if (ty->isTPrimitive()) {
+      return make_compact({}, {ty});
+    } else if (auto n = ty->getAsTFunction()) {
+      auto resCT = go(n->result, pol, {}, inProcess);
+      for (auto it = n->args.rbegin(); it != n->args.rend(); ++it) {
+        auto argCT = go(*it, !pol, {}, inProcess);
+        resCT = make_compact({}, {}, std::nullopt,
+                             std::make_pair(argCT, resCT));
+      }
+      return resCT;
+    } else if (auto n = ty->getAsTRecord()) {
+      std::map<std::string, std::shared_ptr<CompactType>> fields;
+      for (const auto &[name, fieldType] : n->fields) {
+        fields[name] = go(fieldType, pol, {}, inProcess);
+      }
+      return make_compact({}, {}, fields);
+    } else if (auto n = ty->getAsVariableState()) {
+      const auto &bounds = pol ? n->lowerBounds : n->upperBounds;
+      PolarVar tv_pol{ty, pol};
 
-          if constexpr (isTPrimitiveType<T>()) {
-            return make_compact({}, {ty});
-          } else if constexpr (isTFunctionType<T>()) {
-            auto resCT = go(n.result, pol, {}, inProcess);
-            for (auto it = n.args.rbegin(); it != n.args.rend(); ++it) {
-              auto argCT = go(*it, !pol, {}, inProcess);
-              resCT = make_compact({}, {}, std::nullopt,
-                                   std::make_pair(argCT, resCT));
-            }
-            return resCT;
-          } else if constexpr (isTRecordType<T>()) {
-            std::map<std::string, std::shared_ptr<CompactType>> fields;
-            for (const auto &[name, fieldType] : n.fields) {
-              fields[name] = go(fieldType, pol, {}, inProcess);
-            }
-            return make_compact({}, {}, fields);
-          } else if constexpr (isVariableStateType<T>()) {
-            const auto &bounds = pol ? n.lowerBounds : n.upperBounds;
-            PolarVar tv_pol{ty, pol};
-
-            if (inProcess.count(tv_pol)) {
-              if (parents.count(std::make_shared<VariableState>(n))) {
-                // Spurious cycle: ignore the bound
-                return make_compact();
-              } else {
-                // Create recursive variable
-                auto it = recursive.find(tv_pol);
-                if (it == recursive.end()) {
-                  auto freshVar = std::make_shared<VariableState>(
-                      freshSupply.fresh_id(), 0);
-                  recursive[tv_pol] = freshVar;
-                  return make_compact({std::make_shared<TypeNode>(*freshVar)});
-                } else {
-                  return make_compact(
-                      {std::make_shared<TypeNode>(*(it->second))});
-                }
-              }
-            } else {
-              auto newInProcess = inProcess;
-              newInProcess.insert(tv_pol);
-              auto newParents = parents;
-              newParents.insert(std::make_shared<VariableState>(n));
-
-              // Start with the variable itself
-              auto bound = make_compact({ty});
-
-              // Merge all bounds
-              for (const auto &b : bounds) {
-                auto boundCompact = go(b, pol, newParents, newInProcess);
-                bound = merge_compact_types(pol, bound, boundCompact);
-              }
-
-              // Check if we created a recursive variable
-              auto recIt = recursive.find(tv_pol);
-              if (recIt != recursive.end()) {
-                auto fresh_var_type =
-                    std::make_shared<TypeNode>(*(recIt->second));
-                recVars[fresh_var_type] = bound;
-                return make_compact({fresh_var_type});
-              } else {
-                return bound;
-              }
-            }
+      if (inProcess.count(tv_pol)) {
+        if (parents.count(std::make_shared<VariableState>(*n))) {
+          // Spurious cycle: ignore the bound
+          return make_compact();
+        } else {
+          // Create recursive variable
+          auto it = recursive.find(tv_pol);
+          if (it == recursive.end()) {
+            auto freshVar = std::make_shared<VariableState>(
+                freshSupply.fresh_id(), 0);
+            recursive[tv_pol] = freshVar;
+            return make_compact({std::make_shared<TypeNode>(*freshVar)});
           } else {
-            static_assert(!sizeof(T), "Unhandled variant type in compactType");
+            return make_compact(
+                {std::make_shared<TypeNode>(*(it->second))});
           }
-        },
-        ty->v);
+        }
+      } else {
+        auto newInProcess = inProcess;
+        newInProcess.insert(tv_pol);
+        auto newParents = parents;
+        newParents.insert(std::make_shared<VariableState>(*n));
+
+        // Start with the variable itself
+        auto bound = make_compact({ty});
+
+        // Merge all bounds
+        for (const auto &b : bounds) {
+          auto boundCompact = go(b, pol, newParents, newInProcess);
+          bound = merge_compact_types(pol, bound, boundCompact);
+        }
+
+        // Check if we created a recursive variable
+        auto recIt = recursive.find(tv_pol);
+        if (recIt != recursive.end()) {
+          auto fresh_var_type =
+              std::make_shared<TypeNode>(*(recIt->second));
+          recVars[fresh_var_type] = bound;
+          return make_compact({fresh_var_type});
+        } else {
+          return bound;
+        }
+      }
+    } else {
+      assert(false && "Unhandled variant type in compactType");
+    }
   };
 
   std::set<PolarVar> inProcess;
@@ -647,41 +629,34 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
   // Turn outermost layer into CompactType, leaving variables untransformed
   std::function<std::shared_ptr<CompactType>(const SimpleType &, bool)> go0 =
       [&](const SimpleType &ty, bool pol) -> std::shared_ptr<CompactType> {
-    return std::visit(
-        [&](auto const &n) -> std::shared_ptr<CompactType> {
-          using T = std::decay_t<decltype(n)>;
+    if (ty->isTPrimitive()) {
+      return make_compact({}, {ty});
+    } else if (auto n = ty->getAsTFunction()) {
+      auto resCT = go0(n->result, pol);
+      for (auto it = n->args.rbegin(); it != n->args.rend(); ++it) {
+        auto argCT = go0(*it, !pol);
+        resCT = make_compact({}, {}, std::nullopt,
+                             std::make_pair(argCT, resCT));
+      }
+      return resCT;
+    } else if (auto n = ty->getAsTRecord()) {
+      std::map<std::string, std::shared_ptr<CompactType>> fields;
+      for (const auto &[name, fieldType] : n->fields) {
+        fields[name] = go0(fieldType, pol);
+      }
+      return make_compact({}, {}, fields);
+    } else if (auto n = ty->getAsVariableState()) {
+      auto vs_ptr = std::make_shared<VariableState>(*n);
+      auto tvs = closeOver({vs_ptr});
 
-          if constexpr (isTPrimitiveType<T>()) {
-            return make_compact({}, {ty});
-          } else if constexpr (isTFunctionType<T>()) {
-            auto resCT = go0(n.result, pol);
-            for (auto it = n.args.rbegin(); it != n.args.rend(); ++it) {
-              auto argCT = go0(*it, !pol);
-              resCT = make_compact({}, {}, std::nullopt,
-                                   std::make_pair(argCT, resCT));
-            }
-            return resCT;
-          } else if constexpr (isTRecordType<T>()) {
-            std::map<std::string, std::shared_ptr<CompactType>> fields;
-            for (const auto &[name, fieldType] : n.fields) {
-              fields[name] = go0(fieldType, pol);
-            }
-            return make_compact({}, {}, fields);
-          } else if constexpr (isVariableStateType<T>()) {
-            auto vs_ptr = std::make_shared<VariableState>(n);
-            auto tvs = closeOver({vs_ptr});
-
-            std::set<SimpleType> varSet;
-            for (const auto &vs : tvs) {
-              varSet.insert(std::make_shared<TypeNode>(*vs));
-            }
-            return make_compact(varSet);
-          } else {
-            static_assert(!sizeof(T),
-                          "Unhandled variant type in canonicalizeType go0");
-          }
-        },
-        ty->v);
+      std::set<SimpleType> varSet;
+      for (const auto &vs : tvs) {
+        varSet.insert(std::make_shared<TypeNode>(*vs));
+      }
+      return make_compact(varSet);
+    } else {
+      assert(false && "Unhandled variant type in canonicalizeType go0");
+    }
   };
 
   // Merge bounds and traverse the result

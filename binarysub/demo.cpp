@@ -1,14 +1,18 @@
 #include "binarysub.h"
+#include "simplesub-infer.h"
+#include "simplesub-parser.h"
+#include <cassert>
 
 using namespace binarysub;
 
 // Helper function to display CompactTypeScheme
-void printCompactTypeScheme(const CompactTypeScheme &cts, const std::string &title) {
+void printCompactTypeScheme(const CompactTypeScheme &cts,
+                            const std::string &title) {
   std::cout << title << ":\n";
   std::cout << "  Main type: " << toString(*cts.cty) << "\n";
   if (!cts.recVars.empty()) {
     std::cout << "  Recursive variables:\n";
-    for (const auto& [varSimpleType, bound] : cts.recVars) {
+    for (const auto &[varSimpleType, bound] : cts.recVars) {
       auto varPtr = extractVariableState(varSimpleType);
       std::cout << "    α" << varPtr->id << " = " << toString(*bound) << "\n";
     }
@@ -16,31 +20,76 @@ void printCompactTypeScheme(const CompactTypeScheme &cts, const std::string &tit
   std::cout << "\n";
 }
 
+UTypePtr simplifyType(SimpleType ty, bool printDebug) {
+  if (printDebug) {
+    std::cout << "Original type: " << printType(coalesceType(ty)) << "\n";
+  }
+
+  // Process through the pipeline
+  auto compact = compactType(ty);
+  if (printDebug) {
+    std::cout << "✓ Compacted successfully\n";
+    printCompactTypeScheme(compact, "CompactType before simplification");
+  }
+
+  auto simplified = simplifyType(compact);
+  if (printDebug) {
+    std::cout << "✓ Simplified successfully\n";
+    printCompactTypeScheme(simplified, "CompactType after simplification");
+  }
+  auto final = coalesceCompactType(simplified);
+  if (printDebug) {
+    std::cout << "Final type: " << printType(final) << "\n\n";
+  }
+  return final;
+}
+
+void printTypeForExpr(const char* str) {
+  using namespace simplesub;
+  auto [rest, term1] = parseTerm(str);
+  if (!term1) {
+    std::cout << __FILE__ << ":" << __LINE__ << ": ";
+    std::cout << term1.error().msg << "\n";
+    assert(false && "Type error in test!!");
+  }
+  auto typer = Typer();
+  Ctx ctx;
+  auto tyRes = typer.inferType(term1.value(), ctx, 0);
+  if (!tyRes) {
+    std::cout << __FILE__ << ":" << __LINE__ << ": ";
+    std::cout << tyRes.error().msg << "\n";
+    assert(false && "Type error in test!!");
+  }
+  auto ty = tyRes.value();
+  auto final = simplifyType(ty, true);
+}
+
 // Test that VariableState is directly stored in variant
 int test_variant_structure() {
   std::cout << "=== Testing Variant Structure ===\n";
-  
+
   VarSupply supply;
   auto var_type = make_variable(42, 1);
-  
+
   // Test that we can directly access VariableState
   auto vs = var_type->getAsVariableState();
   if (vs && vs->id == 42 && vs->level == 1) {
-    std::cout << "✓ VariableState directly stored in variant with id=" << vs->id << " level=" << vs->level << "\n";
+    std::cout << "✓ VariableState directly stored in variant with id=" << vs->id
+              << " level=" << vs->level << "\n";
   } else {
     std::cout << "✗ Failed to access VariableState directly\n";
     return 1;
   }
-  
+
   // Test that extractVariableState works
   auto extracted_vs = extractVariableState(var_type);
   if (extracted_vs && extracted_vs->id == 42 && extracted_vs->level == 1) {
     std::cout << "✓ extractVariableState helper works correctly\n";
   } else {
-    std::cout << "✗ extractVariableState failed\n"; 
+    std::cout << "✗ extractVariableState failed\n";
     return 1;
   }
-  
+
   std::cout << "✓ Variant structure test passed\n\n";
   return 0;
 }
@@ -137,11 +186,11 @@ int demo_twice() {
   auto ct1 = compactType(twice_type);
   std::cout << "✓ Compacted successfully\n";
   printCompactTypeScheme(ct1, "CompactType before simplification");
-  
+
   auto simplified_ct1 = simplifyType(ct1);
   std::cout << "✓ Simplified successfully\n";
   printCompactTypeScheme(simplified_ct1, "CompactType after simplification");
-  
+
   auto t2 = coalesceCompactType(simplified_ct1);
   std::cout << "Final twice type: " << printType(t2) << "\n";
 
@@ -153,54 +202,60 @@ int demo_simplification() {
 
   VarSupply supply;
   Cache cache;
-  
+
   // Test 1: Basic pipeline test
   std::cout << "Test 1: Basic type compaction and coalescing\n";
-  
+
   auto int_type = make_primitive("int");
   auto simple_func = make_function(int_type, int_type);
-  
-  std::cout << "Original type: " << printType(coalesceType(simple_func)) << "\n";
-  
+
+  std::cout << "Original type: " << printType(coalesceType(simple_func))
+            << "\n";
+
   // Process through the pipeline
   auto compact_func = compactType(simple_func);
   std::cout << "✓ Compacted successfully\n";
   printCompactTypeScheme(compact_func, "CompactType before simplification");
-  
+
   auto simplified_func = simplifyType(compact_func);
   std::cout << "✓ Simplified successfully\n";
   printCompactTypeScheme(simplified_func, "CompactType after simplification");
-  
+
   auto final_func = coalesceCompactType(simplified_func);
   std::cout << "Final type: " << printType(final_func) << "\n\n";
-  
+
   // Test 2: Variable with constraints
   std::cout << "Test 2: Variable with constraints\n";
-  
+
   auto alpha = fresh_variable(supply, 0);
   auto constrained_func = make_function(alpha, int_type);
-  
+
   // Add constraint: int <: alpha (alpha has int as lower bound)
   constrain(int_type, alpha, cache, supply);
-  
-  std::cout << "Original constrained type: " << printType(coalesceType(constrained_func)) << "\n";
-  
+
+  std::cout << "Original constrained type: "
+            << printType(coalesceType(constrained_func)) << "\n";
+
   // Process through the pipeline
   auto compact_constrained = compactType(constrained_func);
-  printCompactTypeScheme(compact_constrained, "CompactType before simplification");
-  
+  printCompactTypeScheme(compact_constrained,
+                         "CompactType before simplification");
+
   auto simplified_constrained = simplifyType(compact_constrained);
-  printCompactTypeScheme(simplified_constrained, "CompactType after simplification");
-  
+  printCompactTypeScheme(simplified_constrained,
+                         "CompactType after simplification");
+
   auto final_constrained = coalesceCompactType(simplified_constrained);
   std::cout << "Final type: " << printType(final_constrained) << "\n\n";
-  
+
   std::cout << "✓ Type simplification pipeline working correctly\n";
-  
+
   return 0;
 }
 
 int main() {
+  printTypeForExpr("let f = fun x -> x in {a = f 0; b = f true}");
+  
   std::cout << "\n=== Simple-sub Type Inference Demo ===\n\n";
 
   int result0 = test_variant_structure();
