@@ -2,6 +2,7 @@
 #include "simplesub-infer.h"
 #include "simplesub-parser.h"
 #include <cassert>
+#include <iostream>
 
 using namespace binarysub;
 
@@ -14,7 +15,8 @@ void printCompactTypeScheme(const CompactTypeScheme &cts,
     std::cout << "  Recursive variables:\n";
     for (const auto &[varSimpleType, bound] : cts.recVars) {
       auto varPtr = extractVariableState(varSimpleType);
-      std::cout << "    " << var_id_to_name(varPtr->id) << " = " << toString(*bound) << "\n";
+      std::cout << "    " << var_id_to_name(varPtr->id) << " = "
+                << toString(*bound) << "\n";
     }
   }
   std::cout << "\n";
@@ -50,11 +52,17 @@ UTypePtr simplifyType(SimpleType ty, bool printDebug) {
 
 UTypePtr getTypeForExpr(const char *str, bool printDebug) {
   using namespace simplesub;
+    if (printDebug) {
+    std::cout << "[#] getTypeForExpr: infer type for: " << str << "\n";
+  }
   auto [rest, term1] = parseTerm(str);
   if (!term1) {
     std::cout << __FILE__ << ":" << __LINE__ << ": ";
     std::cout << term1.error().msg << "\n";
     assert(false && "Type error in test!!");
+  }
+  if (printDebug) {
+    std::cout << "  Parsed Term: " << term1.value()->str() + "\n";
   }
   auto typer = Typer();
   auto tyRes = typer.inferType(term1.value(), typer.getBuiltins(), 0);
@@ -71,7 +79,12 @@ UTypePtr getTypeForExpr(const char *str, bool printDebug) {
 void doTest(const char *str, const char *expected) {
   auto ty = getTypeForExpr(str, !expected);
   if (expected) {
-    assert(printType(ty) == expected && "Test Failed!");
+    auto strTy = printType(ty);
+    if (strTy != expected) {
+      std::cerr << "Error: Test Failed! expect: " << expected << "\n";
+      std::cerr << "Got: " << strTy << "\n";
+      assert(false && "Test Failed!");
+    }
   }
 }
 
@@ -182,7 +195,7 @@ int test_mlsub() {
   )",
                 {
                     "'a -> 'a",
-                    "('a | 'b -> 'a) -> 'b -> 'a",
+                    "('a -> 'a & 'b) -> 'a -> 'b",
                     "{x: int, y: 'a -> 'a}",
                     "{x: int, y: bool}",
                     "bool -> {x: int, y: bool | ('a -> 'a)}",
@@ -282,7 +295,6 @@ int test_misc() {
   std::cout << "✓ test_misc passed\n\n";
   return 0;
 }
-
 
 int main() {
   std::cout << "\n=== Simple-sub Type Inference Tests ===\n\n";

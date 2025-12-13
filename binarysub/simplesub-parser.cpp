@@ -547,4 +547,47 @@ ParseResultT<Pgrm> parsePgrm(const std::string &str) {
   return {rest, Pgrm{defs}};
 }
 
+// ======================= Term to String ========================
+
+std::string Term::str() const {
+  return std::visit(
+      [](const auto &term) -> std::string {
+        using T = std::decay_t<decltype(term)>;
+        if constexpr (std::is_same_v<T, Lit>) {
+          return std::to_string(term.value);
+        } else if constexpr (std::is_same_v<T, Var>) {
+          return term.name;
+        } else if constexpr (std::is_same_v<T, Lam>) {
+          return "fun " + term.name + " -> " + term.rhs->str();
+        } else if constexpr (std::is_same_v<T, App>) {
+          return "(" + term.lhs->str() + " " + term.rhs->str() + ")";
+        } else if constexpr (std::is_same_v<T, Rcd>) {
+          if (term.fields.empty()) {
+            return "{}";
+          }
+          std::string result = "{";
+          for (size_t i = 0; i < term.fields.size(); ++i) {
+            if (i > 0) {
+              result += "; ";
+            }
+            result += term.fields[i].first + " = " + term.fields[i].second->str();
+          }
+          result += "}";
+          return result;
+        } else if constexpr (std::is_same_v<T, Sel>) {
+          return term.receiver->str() + "." + term.fieldName;
+        } else if constexpr (std::is_same_v<T, Let>) {
+          std::string result = "let ";
+          if (term.isRec) {
+            result += "rec ";
+          }
+          result += term.name + " = " + term.rhs->str() + " in " + term.body->str();
+          return result;
+        } else {
+          static_assert(!std::is_same_v<T, T>, "Unhandled Term variant type");
+        }
+      },
+      v);
+}
+
 } // namespace simplesub

@@ -68,6 +68,8 @@ struct Term {
   template <typename T> const T *getAs() const {
     return std::get_if<T>(&v);
   }
+
+  std::string str() const;
 };
 
 // Helper functions to create Term instances
