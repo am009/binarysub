@@ -589,7 +589,7 @@ CompactTypeScheme compactType(const SimpleType &st) {
 
   // Helper lambda to create CompactType with specific components
   auto make_compact =
-      [](std::set<SimpleType> vars = {}, std::set<SimpleType> prims = {},
+      [](std::set<SimpleType> vars = {}, std::set<SimpleType, SimpleTypeValueCompare> prims = {},
          std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
              rec = std::nullopt,
          std::optional<std::pair<std::shared_ptr<CompactType>,
@@ -694,7 +694,7 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
 
   // Helper lambda to create CompactType with specific components
   auto make_compact =
-      [](std::set<SimpleType> vars = {}, std::set<SimpleType> prims = {},
+      [](std::set<SimpleType> vars = {}, std::set<SimpleType, SimpleTypeValueCompare> prims = {},
          std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
              rec = std::nullopt,
          std::optional<std::pair<std::shared_ptr<CompactType>,

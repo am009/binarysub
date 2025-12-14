@@ -2,6 +2,7 @@
 #define BINARYSUB_H
 
 #include "binarysub-core.h"
+#include "binarysub-core-cmp.h"
 #include "binarysub-utils.h"
 
 #include <cassert>
@@ -110,10 +111,18 @@ UTypePtr normalizeVariableNames(const UTypePtr &ty);
 
 // =================== Type Simplification ===========================
 
+// Custom comparator for SimpleType that compares by value instead of pointer
+// address
+struct SimpleTypeValueCompare {
+  bool operator()(const SimpleType &lhs, const SimpleType &rhs) const {
+    return compareSimpleType(lhs, rhs);
+  }
+};
+
 // Intermediate representation for simplification (Section 4.4)
 struct CompactType {
-  std::set<SimpleType> vars;  // type variables
-  std::set<SimpleType> prims; // primitive types
+  std::set<SimpleType> vars;                          // type variables
+  std::set<SimpleType, SimpleTypeValueCompare> prims; // primitive types
   std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
       record; // record fields
   std::optional<

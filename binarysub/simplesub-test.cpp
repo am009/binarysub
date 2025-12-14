@@ -6,6 +6,8 @@
 
 using namespace binarysub;
 
+const bool _is_debug = false;
+
 // Helper function to display CompactTypeScheme
 void printCompactTypeScheme(const CompactTypeScheme &cts,
                             const std::string &title) {
@@ -144,7 +146,7 @@ void doTestProgram(const char *str, const std::vector<const char *> &expected) {
     VarSupply supply;
     auto ty = polyTy.body;
 
-    std::cout << "Simplifying type for definition " << i << "...\n";
+    std::cout << "Simplifying type for definition " << i << ": "<< std::get<2>(pgrm.defs[i])->str() << "...\n";
 
     // Simplify the type
     auto final = simplifyType(ty, printDebug);

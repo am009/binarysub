@@ -34,19 +34,32 @@ struct VariableState {
   std::uint32_t id;
   int level;
   VariableState(std::uint32_t i, int lvl) : id(i), level(lvl) {};
+
+  bool operator<(const VariableState& other) const {
+    if (id != other.id) return id < other.id;
+    return level < other.level;
+  }
 };
 
 struct TPrimitive {
   std::string name;
+
+  bool operator<(const TPrimitive& other) const {
+    return name < other.name;
+  }
 };
 
 struct TFunction {
   std::vector<SimpleType> args;
   SimpleType result;
+
+  bool operator<(const TFunction& other) const;
 };
 
 struct TRecord {
   std::vector<std::pair<std::string, SimpleType>> fields;
+
+  bool operator<(const TRecord& other) const;
 };
 
 struct TypeNode {
@@ -82,6 +95,8 @@ struct TypeNode {
   }
   bool isTFunction() const { return std::holds_alternative<TFunction>(v); }
   bool isTRecord() const { return std::holds_alternative<TRecord>(v); }
+
+  bool operator<(const TypeNode& other) const;
 };
 
 // Type creation functions
@@ -125,6 +140,8 @@ inline VariableState *extractVariableState(const SimpleType &st) {
 }
 // compute the max level contained in a type (lazy in paper; direct here)
 int level_of(const SimpleType &st);
+
+// =====================================================================
 
 using Cache = std::set<std::pair<const TypeNode *, const TypeNode *>>;
 
