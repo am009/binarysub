@@ -728,10 +728,11 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       };
 
   // Close over function to find all connected variables
-  std::function<std::set<SimpleType>(std::set<SimpleType>)>
-      closeOver = [&](std::set<SimpleType> initial)
+  // Respects polarity: follows lowerBounds when pol=true, upperBounds when pol=false
+  std::function<std::set<SimpleType>(std::set<SimpleType>, bool)>
+      closeOver = [&](std::set<SimpleType> initial, bool pol)
       -> std::set<SimpleType> {
-    std::set<SimpleType> result = initial;
+    std::set<SimpleType> done = initial;
     std::set<SimpleType> workSet = initial;
 
     while (!workSet.empty()) {
@@ -740,25 +741,18 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       auto current = current_ty->getAsVariableState();
       if (!current) continue;
 
-      // Add variables from bounds
-      for (const auto &bound : current->lowerBounds) {
+      // Add variables from bounds (polarity-sensitive)
+      const auto &bounds = pol ? current->lowerBounds : current->upperBounds;
+      for (const auto &bound : bounds) {
         if (auto vs = bound->getAsVariableState()) {
-          if (result.find(bound) == result.end()) {
-            result.insert(bound);
-            workSet.insert(bound);
-          }
-        }
-      }
-      for (const auto &bound : current->upperBounds) {
-        if (auto vs = bound->getAsVariableState()) {
-          if (result.find(bound) == result.end()) {
-            result.insert(bound);
+          if (done.find(bound) == done.end()) {
+            done.insert(bound);
             workSet.insert(bound);
           }
         }
       }
     }
-    return result;
+    return done;
   };
 
   // Turn outermost layer into CompactType, leaving variables untransformed
@@ -780,13 +774,8 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       }
       return make_compact({}, {}, fields);
     } else if (auto n = ty->getAsVariableState()) {
-      auto tvs = closeOver({ty});
-
-      std::set<SimpleType> varSet;
-      for (const auto &vs : tvs) {
-        varSet.insert(vs);
-      }
-      return make_compact(varSet);
+      auto tvs = closeOver({ty}, pol);
+      return make_compact(tvs);
     } else {
       assert(false && "Unhandled variant type in canonicalizeType go0");
     }
