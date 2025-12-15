@@ -602,7 +602,7 @@ UTypePtr coalesceType(const SimpleType &st) {
 // ======================= Type Simplification Functions =======================
 
 CompactTypeScheme compactType(const SimpleType &st) {
-  std::map<PolarVar, std::shared_ptr<VariableState>> recursive;
+  std::map<PolarVar, SimpleType> recursive;
   std::map<SimpleType, std::shared_ptr<CompactType>> recVars;
   VarSupply freshSupply; // For creating fresh variables when needed
 
@@ -626,10 +626,10 @@ CompactTypeScheme compactType(const SimpleType &st) {
       };
 
   std::function<std::shared_ptr<CompactType>(
-      const SimpleType &, bool, std::set<std::shared_ptr<VariableState>>,
+      const SimpleType &, bool, std::set<SimpleType>,
       std::set<PolarVar> &)>
       go = [&](const SimpleType &ty, bool pol,
-               std::set<std::shared_ptr<VariableState>> parents,
+               std::set<SimpleType> parents,
                std::set<PolarVar> &inProcess) -> std::shared_ptr<CompactType> {
     if (ty->isTPrimitive()) {
       return make_compact({}, {ty});
@@ -651,26 +651,25 @@ CompactTypeScheme compactType(const SimpleType &st) {
       PolarVar tv_pol{ty, pol};
 
       if (inProcess.count(tv_pol)) {
-        if (parents.count(std::make_shared<VariableState>(*n))) {
+        if (parents.count(ty)) {
           // Spurious cycle: ignore the bound
           return make_compact();
         } else {
           // Create recursive variable
           auto it = recursive.find(tv_pol);
           if (it == recursive.end()) {
-            auto freshVar =
-                std::make_shared<VariableState>(freshSupply.fresh_id(), 0);
+            auto freshVar = make_variable(freshSupply.fresh_id(), 0);
             recursive[tv_pol] = freshVar;
-            return make_compact({std::make_shared<TypeNode>(*freshVar)});
+            return make_compact({freshVar});
           } else {
-            return make_compact({std::make_shared<TypeNode>(*(it->second))});
+            return make_compact({it->second});
           }
         }
       } else {
         auto newInProcess = inProcess;
         newInProcess.insert(tv_pol);
         auto newParents = parents;
-        newParents.insert(std::make_shared<VariableState>(*n));
+        newParents.insert(ty);
 
         // Start with the variable itself
         auto bound = make_compact({ty});
@@ -684,7 +683,7 @@ CompactTypeScheme compactType(const SimpleType &st) {
         // Check if we created a recursive variable
         auto recIt = recursive.find(tv_pol);
         if (recIt != recursive.end()) {
-          auto fresh_var_type = std::make_shared<TypeNode>(*(recIt->second));
+          auto fresh_var_type = recIt->second;
           recVars[fresh_var_type] = bound;
           return make_compact({fresh_var_type});
         } else {
@@ -704,8 +703,7 @@ CompactTypeScheme compactType(const SimpleType &st) {
 
 // https://github.com/LPTK/simple-sub/blob/406e292f349430938de6c612494fd518c4636a84/shared/src/main/scala/simplesub/TypeSimplifier.scala#L102
 CompactTypeScheme canonicalizeType(const SimpleType &st) {
-  std::map<std::pair<std::shared_ptr<CompactType>, bool>,
-           std::shared_ptr<VariableState>>
+  std::map<std::pair<std::shared_ptr<CompactType>, bool>, SimpleType>
       recursive;
   std::map<SimpleType, std::shared_ptr<CompactType>> recVars;
   VarSupply freshSupply;
@@ -730,33 +728,32 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       };
 
   // Close over function to find all connected variables
-  std::function<std::set<std::shared_ptr<VariableState>>(
-      std::set<std::shared_ptr<VariableState>>)>
-      closeOver = [&](std::set<std::shared_ptr<VariableState>> initial)
-      -> std::set<std::shared_ptr<VariableState>> {
-    std::set<std::shared_ptr<VariableState>> result = initial;
-    std::set<std::shared_ptr<VariableState>> workSet = initial;
+  std::function<std::set<SimpleType>(std::set<SimpleType>)>
+      closeOver = [&](std::set<SimpleType> initial)
+      -> std::set<SimpleType> {
+    std::set<SimpleType> result = initial;
+    std::set<SimpleType> workSet = initial;
 
     while (!workSet.empty()) {
-      auto current = *workSet.begin();
+      auto current_ty = *workSet.begin();
       workSet.erase(workSet.begin());
+      auto current = current_ty->getAsVariableState();
+      if (!current) continue;
 
       // Add variables from bounds
       for (const auto &bound : current->lowerBounds) {
         if (auto vs = bound->getAsVariableState()) {
-          auto vs_ptr = std::make_shared<VariableState>(*vs);
-          if (result.find(vs_ptr) == result.end()) {
-            result.insert(vs_ptr);
-            workSet.insert(vs_ptr);
+          if (result.find(bound) == result.end()) {
+            result.insert(bound);
+            workSet.insert(bound);
           }
         }
       }
       for (const auto &bound : current->upperBounds) {
         if (auto vs = bound->getAsVariableState()) {
-          auto vs_ptr = std::make_shared<VariableState>(*vs);
-          if (result.find(vs_ptr) == result.end()) {
-            result.insert(vs_ptr);
-            workSet.insert(vs_ptr);
+          if (result.find(bound) == result.end()) {
+            result.insert(bound);
+            workSet.insert(bound);
           }
         }
       }
@@ -783,12 +780,11 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       }
       return make_compact({}, {}, fields);
     } else if (auto n = ty->getAsVariableState()) {
-      auto vs_ptr = std::make_shared<VariableState>(*n);
-      auto tvs = closeOver({vs_ptr});
+      auto tvs = closeOver({ty});
 
       std::set<SimpleType> varSet;
       for (const auto &vs : tvs) {
-        varSet.insert(std::make_shared<TypeNode>(*vs));
+        varSet.insert(vs);
       }
       return make_compact(varSet);
     } else {
@@ -812,12 +808,11 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       // Recursive case
       auto it = recursive.find(pty);
       if (it == recursive.end()) {
-        auto freshVar =
-            std::make_shared<VariableState>(freshSupply.fresh_id(), 0);
+        auto freshVar = make_variable(freshSupply.fresh_id(), 0);
         recursive[pty] = freshVar;
-        return make_compact({std::make_shared<TypeNode>(*freshVar)});
+        return make_compact({freshVar});
       } else {
-        return make_compact({std::make_shared<TypeNode>(*(it->second))});
+        return make_compact({it->second});
       }
     } else {
       // Collect bounds from all variables
@@ -866,7 +861,7 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       // Check if we created a recursive variable
       auto recIt = recursive.find(pty);
       if (recIt != recursive.end()) {
-        auto fresh_var_type = std::make_shared<TypeNode>(*(recIt->second));
+        auto fresh_var_type = recIt->second;
         recVars[fresh_var_type] = adapted;
         return make_compact({fresh_var_type});
       } else {
@@ -885,7 +880,6 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
 // Co-occurrence analysis implementation
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
   std::map<PolarVar, OccurrenceData> coOccurrences;
-  std::set<VariableState *> allVars;
   std::map<SimpleType, std::shared_ptr<CompactType>> processedRecVars;
 
   // Traverses the type, performing the analysis
@@ -902,8 +896,6 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
     }
     for (const auto &var : ty->vars) {
       if (auto vs = var->getAsVariableState()) {
-        allVars.insert(vs);
-
         PolarVar key{var, pol};
 
         auto it = coOccurrences.find(key);
@@ -1177,7 +1169,6 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
     // Apply substitutions to variables
     for (const auto &var : ty->vars) {
       if (auto tv = var->getAsVariableState()) {
-        VariableState *varPtr = tv;
         auto substIt = varSubst.find(var);
         if (substIt != varSubst.end()) {
           if (substIt->second.has_value()) {
