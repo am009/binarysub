@@ -170,7 +170,7 @@ struct PolarVar {
 // make a copy of the problematic type such that the copy has the requested
 // level and soundly approximates the original type.
 SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
-                   std::map<PolarVar, std::shared_ptr<VariableState>> &cache,
+                   std::map<PolarVar, SimpleType> &cache,
                    VarSupply &supply);
 
 } // namespace binarysub

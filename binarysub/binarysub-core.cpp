@@ -27,7 +27,7 @@ int level_of(const SimpleType &st) {
 
 // ======================= Extrusion implementation =====================
 SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
-                   std::map<PolarVar, std::shared_ptr<VariableState>> &cache,
+                   std::map<PolarVar, SimpleType> &cache,
                    VarSupply &supply) {
   if (level_of(ty) <= lvl)
     return ty;
@@ -58,29 +58,30 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
 
   PolarVar key{ty, pol};
   if (auto it = cache.find(key); it != cache.end()) {
-    return std::make_shared<TypeNode>(*(it->second));
+    return it->second;
   }
 
   // Make a copy at requested level
-  auto nvs = std::make_shared<VariableState>(supply.fresh_id(), lvl);
+  auto nvs = make_variable(supply.fresh_id(), lvl);
   cache.emplace(key, nvs);
+  auto nvs_vs = nvs->getAsVariableState();
 
   if (pol) {
     // positive: copy lowers to the new var; old var upper-bounds include the
     // new var
-    vs->upperBounds.push_back(std::make_shared<TypeNode>(*nvs));
-    nvs->lowerBounds.reserve(vs->lowerBounds.size());
+    vs->upperBounds.push_back(nvs);
+    nvs_vs->lowerBounds.reserve(vs->lowerBounds.size());
     for (auto const &lb : vs->lowerBounds)
-      nvs->lowerBounds.push_back(extrude(lb, pol, lvl, cache, supply));
+      nvs_vs->lowerBounds.push_back(extrude(lb, pol, lvl, cache, supply));
   } else {
     // negative: copy uppers to the new var; old var lower-bounds include the
     // new var
-    vs->lowerBounds.push_back(std::make_shared<TypeNode>(*nvs));
-    nvs->upperBounds.reserve(vs->upperBounds.size());
+    vs->lowerBounds.push_back(nvs);
+    nvs_vs->upperBounds.reserve(vs->upperBounds.size());
     for (auto const &ub : vs->upperBounds)
-      nvs->upperBounds.push_back(extrude(ub, pol, lvl, cache, supply));
+      nvs_vs->upperBounds.push_back(extrude(ub, pol, lvl, cache, supply));
   }
-  return std::make_shared<TypeNode>(*nvs);
+  return nvs;
 }
 
 // ======================= Subtype constraint solver implementation
@@ -188,7 +189,7 @@ expected<void, Error> constrain_impl(
     // else extrude rhs down to lhs.level (negative polarity) and retry
     // make a copy of the problematic type such that the copy has the requested
     // level and soundly approximates the original type.
-    std::map<PolarVar, std::shared_ptr<VariableState>> ex;
+    std::map<PolarVar, SimpleType> ex;
     auto rhs_ex = extrude(rhs, /*pol=*/false, lv->level, ex, supply);
     // 将extrude后的约束加入worklist
     AddToWorklist(lhs, rhs_ex);
@@ -206,7 +207,7 @@ expected<void, Error> constrain_impl(
       return expected<void, Error>{};
     }
     // else extrude lhs down to rhs.level (positive polarity) and retry
-    std::map<PolarVar, std::shared_ptr<VariableState>> ex;
+    std::map<PolarVar, SimpleType> ex;
     auto lhs_ex = extrude(lhs, /*pol=*/true, rv->level, ex, supply);
     // 将extrude后的约束加入worklist
     AddToWorklist(lhs_ex, rhs);
