@@ -125,8 +125,7 @@ struct CompactType {
   std::set<SimpleType, SimpleTypeValueCompare> prims; // primitive types
   std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
       record; // record fields
-  std::optional<
-      std::pair<std::shared_ptr<CompactType>, std::shared_ptr<CompactType>>>
+  std::optional<std::pair<std::vector<std::shared_ptr<CompactType>>, std::shared_ptr<CompactType>>>
       function; // function type
 };
 

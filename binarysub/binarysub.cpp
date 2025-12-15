@@ -326,8 +326,20 @@ merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
 
   // Merge function types
   if (lhs->function && rhs->function) {
+    // Merge argument vectors element-wise
+    std::vector<std::shared_ptr<CompactType>> mergedArgs;
+    size_t maxArgs = std::max(lhs->function->first.size(), rhs->function->first.size());
+    for (size_t i = 0; i < maxArgs; ++i) {
+      if (i < lhs->function->first.size() && i < rhs->function->first.size()) {
+        mergedArgs.push_back(merge_compact_types(!pol, lhs->function->first[i], rhs->function->first[i]));
+      } else if (i < lhs->function->first.size()) {
+        mergedArgs.push_back(lhs->function->first[i]);
+      } else {
+        mergedArgs.push_back(rhs->function->first[i]);
+      }
+    }
     result->function = std::make_pair(
-        merge_compact_types(!pol, lhs->function->first, rhs->function->first),
+        mergedArgs,
         merge_compact_types(pol, lhs->function->second, rhs->function->second));
   } else if (lhs->function) {
     result->function = lhs->function;
@@ -406,9 +418,14 @@ std::string toString(const CompactType &ct) {
 
   // Add function type
   if (ct.function) {
-    std::string lhs = toString(*ct.function->first);
-    std::string rhs = toString(*ct.function->second);
-    components.push_back("(" + lhs + " → " + rhs + ")");
+    std::ostringstream funOss;
+    funOss << "(";
+    for (size_t i = 0; i < ct.function->first.size(); ++i) {
+      if (i > 0) funOss << ", ";
+      funOss << toString(*ct.function->first[i]);
+    }
+    funOss << " → " << toString(*ct.function->second) << ")";
+    components.push_back(funOss.str());
   }
 
   // Combine components
@@ -597,7 +614,7 @@ CompactTypeScheme compactType(const SimpleType &st) {
          std::set<SimpleType, SimpleTypeValueCompare> prims = {},
          std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
              rec = std::nullopt,
-         std::optional<std::pair<std::shared_ptr<CompactType>,
+         std::optional<std::pair<std::vector<std::shared_ptr<CompactType>>,
                                  std::shared_ptr<CompactType>>>
              fun = std::nullopt) {
         auto ct = std::make_shared<CompactType>();
@@ -617,13 +634,12 @@ CompactTypeScheme compactType(const SimpleType &st) {
     if (ty->isTPrimitive()) {
       return make_compact({}, {ty});
     } else if (auto n = ty->getAsTFunction()) {
-      auto resCT = go(n->result, pol, {}, inProcess);
-      for (auto it = n->args.rbegin(); it != n->args.rend(); ++it) {
-        auto argCT = go(*it, !pol, {}, inProcess);
-        resCT =
-            make_compact({}, {}, std::nullopt, std::make_pair(argCT, resCT));
+      std::vector<std::shared_ptr<CompactType>> argCTs;
+      for (const auto &arg : n->args) {
+        argCTs.push_back(go(arg, !pol, {}, inProcess));
       }
-      return resCT;
+      auto resCT = go(n->result, pol, {}, inProcess);
+      return make_compact({}, {}, std::nullopt, std::make_pair(argCTs, resCT));
     } else if (auto n = ty->getAsTRecord()) {
       std::map<std::string, std::shared_ptr<CompactType>> fields;
       for (const auto &[name, fieldType] : n->fields) {
@@ -686,6 +702,7 @@ CompactTypeScheme compactType(const SimpleType &st) {
   return CompactTypeScheme{compactTerm, recVars};
 }
 
+// https://github.com/LPTK/simple-sub/blob/406e292f349430938de6c612494fd518c4636a84/shared/src/main/scala/simplesub/TypeSimplifier.scala#L102
 CompactTypeScheme canonicalizeType(const SimpleType &st) {
   std::map<std::pair<std::shared_ptr<CompactType>, bool>,
            std::shared_ptr<VariableState>>
@@ -701,7 +718,7 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
          std::set<SimpleType, SimpleTypeValueCompare> prims = {},
          std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
              rec = std::nullopt,
-         std::optional<std::pair<std::shared_ptr<CompactType>,
+         std::optional<std::pair<std::vector<std::shared_ptr<CompactType>>,
                                  std::shared_ptr<CompactType>>>
              fun = std::nullopt) {
         auto ct = std::make_shared<CompactType>();
@@ -753,13 +770,12 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
     if (ty->isTPrimitive()) {
       return make_compact({}, {ty});
     } else if (auto n = ty->getAsTFunction()) {
-      auto resCT = go0(n->result, pol);
-      for (auto it = n->args.rbegin(); it != n->args.rend(); ++it) {
-        auto argCT = go0(*it, !pol);
-        resCT =
-            make_compact({}, {}, std::nullopt, std::make_pair(argCT, resCT));
+      std::vector<std::shared_ptr<CompactType>> argCTs;
+      for (const auto &arg : n->args) {
+        argCTs.push_back(go0(arg, !pol));
       }
-      return resCT;
+      auto resCT = go0(n->result, pol);
+      return make_compact({}, {}, std::nullopt, std::make_pair(argCTs, resCT));
     } else if (auto n = ty->getAsTRecord()) {
       std::map<std::string, std::shared_ptr<CompactType>> fields;
       for (const auto &[name, fieldType] : n->fields) {
@@ -838,8 +854,12 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       }
 
       if (res->function) {
+        std::vector<std::shared_ptr<CompactType>> adaptedArgs;
+        for (const auto &arg : res->function->first) {
+          adaptedArgs.push_back(go1(arg, !pol, newInProcess));
+        }
         adapted->function =
-            std::make_pair(go1(res->function->first, !pol, newInProcess),
+            std::make_pair(adaptedArgs,
                            go1(res->function->second, pol, newInProcess));
       }
 
@@ -944,7 +964,9 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
 
     // Recursively process function types
     if (ty->function) {
-      go(ty->function->first, !pol); // Contravariant position
+      for (const auto &arg : ty->function->first) {
+        go(arg, !pol); // Contravariant position
+      }
       go(ty->function->second, pol); // Covariant position
     }
   };
@@ -978,7 +1000,9 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
       }
     }
     if (ty->function) {
-      collectVars(ty->function->first);
+      for (const auto &arg : ty->function->first) {
+        collectVars(arg);
+      }
       collectVars(ty->function->second);
     }
   };
@@ -1182,7 +1206,11 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
 
     // Recursively reconstruct function types
     if (ty->function) {
-      result->function = std::make_pair(reconstruct(ty->function->first),
+      std::vector<std::shared_ptr<CompactType>> reconstructedArgs;
+      for (const auto &arg : ty->function->first) {
+        reconstructedArgs.push_back(reconstruct(arg));
+      }
+      result->function = std::make_pair(reconstructedArgs,
                                         reconstruct(ty->function->second));
     }
 
@@ -1278,14 +1306,10 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty) {
     // Add function type
     if (ty->function) {
       std::vector<UTypePtr> funArgs;
-      std::set<const CompactType *> seen;
-      auto current = ty;
-      while (current && current->function &&
-             seen.insert(current.get()).second) {
-        funArgs.push_back(go(current->function->first, !pol, newInProcess));
-        current = current->function->second;
+      for (const auto &arg : ty->function->first) {
+        funArgs.push_back(go(arg, !pol, newInProcess));
       }
-      auto rhs = go(current ? current : ty, pol, newInProcess);
+      auto rhs = go(ty->function->second, pol, newInProcess);
       components.push_back(make_ufunctiontype(std::move(funArgs), rhs));
     }
 
