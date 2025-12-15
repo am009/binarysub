@@ -4,11 +4,11 @@
 #include "binarysub-utils.h"
 
 #include <cassert>
+#include <map>
 #include <memory>
 #include <set>
 #include <variant>
 #include <vector>
-#include <map>
 
 namespace binarysub {
 
@@ -35,8 +35,9 @@ struct VariableState {
   int level;
   VariableState(std::uint32_t i, int lvl) : id(i), level(lvl) {};
 
-  bool operator<(const VariableState& other) const {
-    if (id != other.id) return id < other.id;
+  bool operator<(const VariableState &other) const {
+    if (id != other.id)
+      return id < other.id;
     return level < other.level;
   }
 };
@@ -44,22 +45,20 @@ struct VariableState {
 struct TPrimitive {
   std::string name;
 
-  bool operator<(const TPrimitive& other) const {
-    return name < other.name;
-  }
+  bool operator<(const TPrimitive &other) const { return name < other.name; }
 };
 
 struct TFunction {
   std::vector<SimpleType> args;
   SimpleType result;
 
-  bool operator<(const TFunction& other) const;
+  bool operator<(const TFunction &other) const;
 };
 
 struct TRecord {
   std::vector<std::pair<std::string, SimpleType>> fields;
 
-  bool operator<(const TRecord& other) const;
+  bool operator<(const TRecord &other) const;
 };
 
 struct TypeNode {
@@ -96,7 +95,7 @@ struct TypeNode {
   bool isTFunction() const { return std::holds_alternative<TFunction>(v); }
   bool isTRecord() const { return std::holds_alternative<TRecord>(v); }
 
-  bool operator<(const TypeNode& other) const;
+  bool operator<(const TypeNode &other) const;
 };
 
 // Type creation functions
@@ -114,7 +113,8 @@ inline SimpleType fresh_variable(VarSupply &vs, int lvl) {
   return make_variable(vs.fresh_id(), lvl);
 }
 
-inline SimpleType make_function(std::vector<SimpleType> args, SimpleType result) {
+inline SimpleType make_function(std::vector<SimpleType> args,
+                                SimpleType result) {
   return std::make_shared<TypeNode>(
       TFunction{std::move(args), std::move(result)});
 }
@@ -125,7 +125,8 @@ inline SimpleType make_function(SimpleType a, SimpleType b) {
   return make_function(std::move(args), std::move(b));
 }
 
-inline SimpleType make_record(std::vector<std::pair<std::string, SimpleType>> fields) {
+inline SimpleType
+make_record(std::vector<std::pair<std::string, SimpleType>> fields) {
   std::sort(fields.begin(), fields.end(),
             [](auto &x, auto &y) { return x.first < y.first; });
   return std::make_shared<TypeNode>(TRecord{std::move(fields)});
@@ -166,11 +167,11 @@ struct PolarVar {
   }
 };
 
-// make a copy of the problematic type such that the copy has the requested level and soundly approximates the original type.
+// make a copy of the problematic type such that the copy has the requested
+// level and soundly approximates the original type.
 SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
                    std::map<PolarVar, std::shared_ptr<VariableState>> &cache,
                    VarSupply &supply);
-
 
 } // namespace binarysub
 

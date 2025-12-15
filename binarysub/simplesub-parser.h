@@ -61,13 +61,9 @@ struct Term {
   explicit Term(Sel sel) : v(std::move(sel)) {}
   explicit Term(Let let) : v(std::move(let)) {}
 
-  template <typename T> T *getAs() {
-    return std::get_if<T>(&v);
-  }
+  template <typename T> T *getAs() { return std::get_if<T>(&v); }
 
-  template <typename T> const T *getAs() const {
-    return std::get_if<T>(&v);
-  }
+  template <typename T> const T *getAs() const { return std::get_if<T>(&v); }
 
   std::string str() const;
 };

@@ -23,7 +23,7 @@ struct PolymorphicType {
   binarysub::SimpleType body;
 
   PolymorphicType(int lvl, binarysub::SimpleType b)
-    : level(lvl), body(std::move(b)) {}
+      : level(lvl), body(std::move(b)) {}
 };
 
 // A type scheme can be either a SimpleType or a PolymorphicType
@@ -34,15 +34,11 @@ struct TypeScheme {
   explicit TypeScheme(PolymorphicType pt) : v(std::move(pt)) {}
 
   // Instantiate the type scheme at a given level
-  binarysub::SimpleType instantiate(int lvl, binarysub::VarSupply& supply);
+  binarysub::SimpleType instantiate(int lvl, binarysub::VarSupply &supply);
 
-  template <typename T> T *getAs() {
-    return std::get_if<T>(&v);
-  }
+  template <typename T> T *getAs() { return std::get_if<T>(&v); }
 
-  template <typename T> const T *getAs() const {
-    return std::get_if<T>(&v);
-  }
+  template <typename T> const T *getAs() const { return std::get_if<T>(&v); }
 };
 
 // ======================= Typer Context ========================
@@ -57,14 +53,14 @@ public:
 
   // Main type inference function for a program
   std::vector<binarysub::expected<PolymorphicType, binarysub::Error>>
-    inferTypes(const Pgrm& pgrm, const Ctx& ctx);
+  inferTypes(const Pgrm &pgrm, const Ctx &ctx);
 
   // Infer the type of a single term
   binarysub::expected<binarysub::SimpleType, binarysub::Error>
-    inferType(const TermPtr& term, const Ctx& ctx, int lvl);
+  inferType(const TermPtr &term, const Ctx &ctx, int lvl);
 
   // Get the built-in context
-  const Ctx& getBuiltins() const { return builtins; }
+  const Ctx &getBuiltins() const { return builtins; }
 
 private:
   binarysub::VarSupply supply;
@@ -73,15 +69,16 @@ private:
 
   // Infer the type of a let binding right-hand side
   binarysub::expected<PolymorphicType, binarysub::Error>
-    typeLetRhs(bool isRec, const std::string& name, const TermPtr& rhs,
-               const Ctx& ctx, int lvl);
+  typeLetRhs(bool isRec, const std::string &name, const TermPtr &rhs,
+             const Ctx &ctx, int lvl);
 
   // Infer the type of a term (internal implementation)
   binarysub::expected<binarysub::SimpleType, binarysub::Error>
-    typeTerm(const TermPtr& term, const Ctx& ctx, int lvl);
+  typeTerm(const TermPtr &term, const Ctx &ctx, int lvl);
 
   // Freshen type variables above a certain level
-  binarysub::SimpleType freshenAbove(int lim, const binarysub::SimpleType& ty, int lvl);
+  binarysub::SimpleType freshenAbove(int lim, const binarysub::SimpleType &ty,
+                                     int lvl);
 };
 
 } // namespace simplesub

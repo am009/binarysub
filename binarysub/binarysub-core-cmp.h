@@ -8,9 +8,9 @@ namespace binarysub {
 // ======================= Comparison operators for types ===================
 
 // Forward declaration for recursive comparison
-inline bool compareSimpleType(const SimpleType& lhs, const SimpleType& rhs);
+inline bool compareSimpleType(const SimpleType &lhs, const SimpleType &rhs);
 
-inline bool TFunction::operator<(const TFunction& other) const {
+inline bool TFunction::operator<(const TFunction &other) const {
   // Compare argument count first
   if (args.size() != other.args.size()) {
     return args.size() < other.args.size();
@@ -28,15 +28,15 @@ inline bool TFunction::operator<(const TFunction& other) const {
   return compareSimpleType(result, other.result);
 }
 
-inline bool TRecord::operator<(const TRecord& other) const {
+inline bool TRecord::operator<(const TRecord &other) const {
   // Compare field count first
   if (fields.size() != other.fields.size()) {
     return fields.size() < other.fields.size();
   }
   // Compare fields
   for (size_t i = 0; i < fields.size(); ++i) {
-    const auto& lhs_field = fields[i];
-    const auto& rhs_field = other.fields[i];
+    const auto &lhs_field = fields[i];
+    const auto &rhs_field = other.fields[i];
     if (lhs_field.first != rhs_field.first) {
       return lhs_field.first < rhs_field.first;
     }
@@ -50,7 +50,7 @@ inline bool TRecord::operator<(const TRecord& other) const {
   return false;
 }
 
-inline bool TypeNode::operator<(const TypeNode& other) const {
+inline bool TypeNode::operator<(const TypeNode &other) const {
   // Get the variant indices to compare type categories first
   auto lhs_idx = v.index();
   auto rhs_idx = other.v.index();
@@ -60,17 +60,17 @@ inline bool TypeNode::operator<(const TypeNode& other) const {
   }
 
   // Both have the same variant type, compare contents
-  if (const auto* lhs_prim = getAsTPrimitive()) {
-    const auto* rhs_prim = other.getAsTPrimitive();
+  if (const auto *lhs_prim = getAsTPrimitive()) {
+    const auto *rhs_prim = other.getAsTPrimitive();
     return *lhs_prim < *rhs_prim;
-  } else if (const auto* lhs_var = getAsVariableState()) {
-    const auto* rhs_var = other.getAsVariableState();
+  } else if (const auto *lhs_var = getAsVariableState()) {
+    const auto *rhs_var = other.getAsVariableState();
     return *lhs_var < *rhs_var;
-  } else if (const auto* lhs_func = getAsTFunction()) {
-    const auto* rhs_func = other.getAsTFunction();
+  } else if (const auto *lhs_func = getAsTFunction()) {
+    const auto *rhs_func = other.getAsTFunction();
     return *lhs_func < *rhs_func;
-  } else if (const auto* lhs_rec = getAsTRecord()) {
-    const auto* rhs_rec = other.getAsTRecord();
+  } else if (const auto *lhs_rec = getAsTRecord()) {
+    const auto *rhs_rec = other.getAsTRecord();
     return *lhs_rec < *rhs_rec;
   } else {
     // Should not happen - all cases covered
@@ -80,11 +80,14 @@ inline bool TypeNode::operator<(const TypeNode& other) const {
   }
 }
 
-inline bool compareSimpleType(const SimpleType& lhs, const SimpleType& rhs) {
+inline bool compareSimpleType(const SimpleType &lhs, const SimpleType &rhs) {
   // Handle null pointers
-  if (!lhs && !rhs) return false;
-  if (!lhs) return true;
-  if (!rhs) return false;
+  if (!lhs && !rhs)
+    return false;
+  if (!lhs)
+    return true;
+  if (!rhs)
+    return false;
 
   return *lhs < *rhs;
 }

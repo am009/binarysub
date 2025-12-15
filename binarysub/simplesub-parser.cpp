@@ -48,14 +48,13 @@ ParseResultT<int> parseNumber(const std::string &str) {
 ParseResultT<std::string> parseIdent(const std::string &str) {
   std::string rest = skipWhitespace(str);
   if (rest.empty() || !(isLetter(rest[0]) || rest[0] == '_')) {
-    return {rest, binarysub::make_unexpected(
-                      binarysub::Error::make("parseIdent: Expected identifier"))};
+    return {rest, binarysub::make_unexpected(binarysub::Error::make(
+                      "parseIdent: Expected identifier"))};
   }
 
   size_t end = 0;
-  while (end < rest.size() &&
-         (isLetter(rest[end]) || isDigit(rest[end]) || rest[end] == '_' ||
-          rest[end] == '\'')) {
+  while (end < rest.size() && (isLetter(rest[end]) || isDigit(rest[end]) ||
+                               rest[end] == '_' || rest[end] == '\'')) {
     ++end;
   }
 
@@ -220,8 +219,8 @@ ParseResultT<TermPtr> parseRecord(const std::string &str) {
     }
 
     if (!consumeChar(rest, ';')) {
-      return {rest, binarysub::make_unexpected(
-                        binarysub::Error::make("parseRecord: Expected ';' or '}'"))};
+      return {rest, binarysub::make_unexpected(binarysub::Error::make(
+                        "parseRecord: Expected ';' or '}'"))};
     }
 
     rest = skipWhitespace(rest);
@@ -424,7 +423,8 @@ ParseResultT<TermPtr> parseApps(const std::string &str) {
     // Check for keywords
     bool isKw = false;
     for (const auto &kw : keywords) {
-      if (kw == "true" || kw == "false") continue;
+      if (kw == "true" || kw == "false")
+        continue;
       if (peek.size() >= kw.size() && peek.substr(0, kw.size()) == kw) {
         if (peek.size() == kw.size() ||
             (!isLetter(peek[kw.size()]) && !isDigit(peek[kw.size()]) &&
@@ -440,8 +440,8 @@ ParseResultT<TermPtr> parseApps(const std::string &str) {
   }
 
   if (terms.empty()) {
-    return {rest, binarysub::make_unexpected(
-                      binarysub::Error::make("parseApps: Expected at least one term"))};
+    return {rest, binarysub::make_unexpected(binarysub::Error::make(
+                      "parseApps: Expected at least one term"))};
   }
 
   // Left-associate applications
@@ -570,7 +570,8 @@ std::string Term::str() const {
             if (i > 0) {
               result += "; ";
             }
-            result += term.fields[i].first + " = " + term.fields[i].second->str();
+            result +=
+                term.fields[i].first + " = " + term.fields[i].second->str();
           }
           result += "}";
           return result;
@@ -581,7 +582,8 @@ std::string Term::str() const {
           if (term.isRec) {
             result += "rec ";
           }
-          result += term.name + " = " + term.rhs->str() + " in " + term.body->str();
+          result +=
+              term.name + " = " + term.rhs->str() + " in " + term.body->str();
           return result;
         } else {
           static_assert(!std::is_same_v<T, T>, "Unhandled Term variant type");

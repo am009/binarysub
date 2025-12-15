@@ -1,6 +1,6 @@
 #include "binarysub.h"
-#include <numeric>
 #include <functional>
+#include <numeric>
 #include <sstream>
 
 namespace binarysub {
@@ -49,33 +49,35 @@ UTypePtr normalizeVariableNames(const UTypePtr &ty) {
   std::vector<std::string> varOrder;
   std::set<std::string> seenVars;
 
-  std::function<void(const UTypePtr&)> collectVars = [&](const UTypePtr& t) {
-    std::visit([&](auto const &n) {
-      using T = std::decay_t<decltype(n)>;
-      if constexpr (std::is_same_v<T, UTypeVariable>) {
-        if (seenVars.find(n.name) == seenVars.end()) {
-          seenVars.insert(n.name);
-          varOrder.push_back(n.name);
-        }
-      } else if constexpr (std::is_same_v<T, UFunctionType>) {
-        for (const auto& arg : n.args) {
-          collectVars(arg);
-        }
-        collectVars(n.result);
-      } else if constexpr (std::is_same_v<T, UUnion>) {
-        collectVars(n.lhs);
-        collectVars(n.rhs);
-      } else if constexpr (std::is_same_v<T, UInter>) {
-        collectVars(n.lhs);
-        collectVars(n.rhs);
-      } else if constexpr (std::is_same_v<T, URecordType>) {
-        for (const auto& [_, fieldType] : n.fields) {
-          collectVars(fieldType);
-        }
-      } else if constexpr (std::is_same_v<T, URecursiveType>) {
-        collectVars(n.body);
-      }
-    }, t->v);
+  std::function<void(const UTypePtr &)> collectVars = [&](const UTypePtr &t) {
+    std::visit(
+        [&](auto const &n) {
+          using T = std::decay_t<decltype(n)>;
+          if constexpr (std::is_same_v<T, UTypeVariable>) {
+            if (seenVars.find(n.name) == seenVars.end()) {
+              seenVars.insert(n.name);
+              varOrder.push_back(n.name);
+            }
+          } else if constexpr (std::is_same_v<T, UFunctionType>) {
+            for (const auto &arg : n.args) {
+              collectVars(arg);
+            }
+            collectVars(n.result);
+          } else if constexpr (std::is_same_v<T, UUnion>) {
+            collectVars(n.lhs);
+            collectVars(n.rhs);
+          } else if constexpr (std::is_same_v<T, UInter>) {
+            collectVars(n.lhs);
+            collectVars(n.rhs);
+          } else if constexpr (std::is_same_v<T, URecordType>) {
+            for (const auto &[_, fieldType] : n.fields) {
+              collectVars(fieldType);
+            }
+          } else if constexpr (std::is_same_v<T, URecursiveType>) {
+            collectVars(n.body);
+          }
+        },
+        t->v);
   };
 
   collectVars(ty);
@@ -94,43 +96,47 @@ UTypePtr normalizeVariableNames(const UTypePtr &ty) {
   }
 
   // Second pass: replace all variable names
-  std::function<UTypePtr(const UTypePtr&)> renameVars = [&](const UTypePtr& t) -> UTypePtr {
-    return std::visit([&](auto const &n) -> UTypePtr {
-      using T = std::decay_t<decltype(n)>;
-      if constexpr (std::is_same_v<T, UTop>) {
-        return make_utop();
-      } else if constexpr (std::is_same_v<T, UBot>) {
-        return make_ubot();
-      } else if constexpr (std::is_same_v<T, UPrimitiveType>) {
-        return make_uprimitivetype(n.name);
-      } else if constexpr (std::is_same_v<T, UTypeVariable>) {
-        auto it = nameMap.find(n.name);
-        if (it != nameMap.end()) {
-          return make_utypevariable(it->second);
-        }
-        return make_utypevariable(n.name);
-      } else if constexpr (std::is_same_v<T, UFunctionType>) {
-        std::vector<UTypePtr> newArgs;
-        for (const auto& arg : n.args) {
-          newArgs.push_back(renameVars(arg));
-        }
-        return make_ufunctiontype(std::move(newArgs), renameVars(n.result));
-      } else if constexpr (std::is_same_v<T, UUnion>) {
-        return make_uunion(renameVars(n.lhs), renameVars(n.rhs));
-      } else if constexpr (std::is_same_v<T, UInter>) {
-        return make_uinter(renameVars(n.lhs), renameVars(n.rhs));
-      } else if constexpr (std::is_same_v<T, URecordType>) {
-        std::vector<std::pair<std::string, UTypePtr>> newFields;
-        for (const auto& [name, fieldType] : n.fields) {
-          newFields.emplace_back(name, renameVars(fieldType));
-        }
-        return make_urecordtype(std::move(newFields));
-      } else if constexpr (std::is_same_v<T, URecursiveType>) {
-        return make_urecursivetype(n.name, renameVars(n.body));
-      } else {
-        static_assert(!sizeof(T), "Unhandled UType variant in normalizeVariableNames");
-      }
-    }, t->v);
+  std::function<UTypePtr(const UTypePtr &)> renameVars =
+      [&](const UTypePtr &t) -> UTypePtr {
+    return std::visit(
+        [&](auto const &n) -> UTypePtr {
+          using T = std::decay_t<decltype(n)>;
+          if constexpr (std::is_same_v<T, UTop>) {
+            return make_utop();
+          } else if constexpr (std::is_same_v<T, UBot>) {
+            return make_ubot();
+          } else if constexpr (std::is_same_v<T, UPrimitiveType>) {
+            return make_uprimitivetype(n.name);
+          } else if constexpr (std::is_same_v<T, UTypeVariable>) {
+            auto it = nameMap.find(n.name);
+            if (it != nameMap.end()) {
+              return make_utypevariable(it->second);
+            }
+            return make_utypevariable(n.name);
+          } else if constexpr (std::is_same_v<T, UFunctionType>) {
+            std::vector<UTypePtr> newArgs;
+            for (const auto &arg : n.args) {
+              newArgs.push_back(renameVars(arg));
+            }
+            return make_ufunctiontype(std::move(newArgs), renameVars(n.result));
+          } else if constexpr (std::is_same_v<T, UUnion>) {
+            return make_uunion(renameVars(n.lhs), renameVars(n.rhs));
+          } else if constexpr (std::is_same_v<T, UInter>) {
+            return make_uinter(renameVars(n.lhs), renameVars(n.rhs));
+          } else if constexpr (std::is_same_v<T, URecordType>) {
+            std::vector<std::pair<std::string, UTypePtr>> newFields;
+            for (const auto &[name, fieldType] : n.fields) {
+              newFields.emplace_back(name, renameVars(fieldType));
+            }
+            return make_urecordtype(std::move(newFields));
+          } else if constexpr (std::is_same_v<T, URecursiveType>) {
+            return make_urecursivetype(n.name, renameVars(n.body));
+          } else {
+            static_assert(!sizeof(T),
+                          "Unhandled UType variant in normalizeVariableNames");
+          }
+        },
+        t->v);
   };
 
   return renameVars(ty);
@@ -213,8 +219,7 @@ SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
     std::vector<SimpleType> args;
     args.reserve(n->args.size());
     for (auto const &a : n->args)
-      args.push_back(
-          freshen_above_rec(a, cutoff, at_level, memo, supply));
+      args.push_back(freshen_above_rec(a, cutoff, at_level, memo, supply));
     return make_function(
         std::move(args),
         freshen_above_rec(n->result, cutoff, at_level, memo, supply));
@@ -222,8 +227,8 @@ SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
     std::vector<std::pair<std::string, SimpleType>> fs;
     fs.reserve(n->fields.size());
     for (auto const &[name, sub] : n->fields)
-      fs.emplace_back(
-          name, freshen_above_rec(sub, cutoff, at_level, memo, supply));
+      fs.emplace_back(name,
+                      freshen_above_rec(sub, cutoff, at_level, memo, supply));
     return make_record(std::move(fs));
   } else if (auto n = t->getAsVariableState()) {
     // VariableState
@@ -565,8 +570,7 @@ UTypePtr coalesceType(const SimpleType &st) {
         if (recIt != recursive.end()) {
           return make_urecursivetype(recIt->second, result);
         } else {
-          return result ? result
-                        : make_utypevariable(var_id_to_name(n->id));
+          return result ? result : make_utypevariable(var_id_to_name(n->id));
         }
       }
     } else {
@@ -589,7 +593,8 @@ CompactTypeScheme compactType(const SimpleType &st) {
 
   // Helper lambda to create CompactType with specific components
   auto make_compact =
-      [](std::set<SimpleType> vars = {}, std::set<SimpleType, SimpleTypeValueCompare> prims = {},
+      [](std::set<SimpleType> vars = {},
+         std::set<SimpleType, SimpleTypeValueCompare> prims = {},
          std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
              rec = std::nullopt,
          std::optional<std::pair<std::shared_ptr<CompactType>,
@@ -615,8 +620,8 @@ CompactTypeScheme compactType(const SimpleType &st) {
       auto resCT = go(n->result, pol, {}, inProcess);
       for (auto it = n->args.rbegin(); it != n->args.rend(); ++it) {
         auto argCT = go(*it, !pol, {}, inProcess);
-        resCT = make_compact({}, {}, std::nullopt,
-                             std::make_pair(argCT, resCT));
+        resCT =
+            make_compact({}, {}, std::nullopt, std::make_pair(argCT, resCT));
       }
       return resCT;
     } else if (auto n = ty->getAsTRecord()) {
@@ -637,13 +642,12 @@ CompactTypeScheme compactType(const SimpleType &st) {
           // Create recursive variable
           auto it = recursive.find(tv_pol);
           if (it == recursive.end()) {
-            auto freshVar = std::make_shared<VariableState>(
-                freshSupply.fresh_id(), 0);
+            auto freshVar =
+                std::make_shared<VariableState>(freshSupply.fresh_id(), 0);
             recursive[tv_pol] = freshVar;
             return make_compact({std::make_shared<TypeNode>(*freshVar)});
           } else {
-            return make_compact(
-                {std::make_shared<TypeNode>(*(it->second))});
+            return make_compact({std::make_shared<TypeNode>(*(it->second))});
           }
         }
       } else {
@@ -664,8 +668,7 @@ CompactTypeScheme compactType(const SimpleType &st) {
         // Check if we created a recursive variable
         auto recIt = recursive.find(tv_pol);
         if (recIt != recursive.end()) {
-          auto fresh_var_type =
-              std::make_shared<TypeNode>(*(recIt->second));
+          auto fresh_var_type = std::make_shared<TypeNode>(*(recIt->second));
           recVars[fresh_var_type] = bound;
           return make_compact({fresh_var_type});
         } else {
@@ -694,7 +697,8 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
 
   // Helper lambda to create CompactType with specific components
   auto make_compact =
-      [](std::set<SimpleType> vars = {}, std::set<SimpleType, SimpleTypeValueCompare> prims = {},
+      [](std::set<SimpleType> vars = {},
+         std::set<SimpleType, SimpleTypeValueCompare> prims = {},
          std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
              rec = std::nullopt,
          std::optional<std::pair<std::shared_ptr<CompactType>,
@@ -752,8 +756,8 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       auto resCT = go0(n->result, pol);
       for (auto it = n->args.rbegin(); it != n->args.rend(); ++it) {
         auto argCT = go0(*it, !pol);
-        resCT = make_compact({}, {}, std::nullopt,
-                             std::make_pair(argCT, resCT));
+        resCT =
+            make_compact({}, {}, std::nullopt, std::make_pair(argCT, resCT));
       }
       return resCT;
     } else if (auto n = ty->getAsTRecord()) {
@@ -949,7 +953,7 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
   return coOccurrences;
 }
 
-CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
+CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   // State accumulated during the analysis phase
   std::set<SimpleType> allVars;
   std::map<SimpleType, std::shared_ptr<CompactType>> recVars = cty.recVars;
@@ -998,8 +1002,10 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
 
       if ((hasPos && !hasNeg) || (!hasPos && hasNeg)) {
         // Variable only occurs in one polarity - remove it
-        // std::cerr << "Removing variable (only occurs in one polarity): " <<
-        // var_id_to_name(varPtr->id) << "\n";
+        if (printDebug) {
+          std::cerr << "Removing variable (only occurs in one polarity): "
+                    << var_id_to_name(varPtr->getAsVariableState()->id) << "\n";
+        }
         varSubst[varPtr] = std::nullopt;
       }
     }
@@ -1030,9 +1036,12 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
               (recVars.count(varPtr) > 0) == (recVars.count(coOccPtr) > 0)) {
 
             // Check if coOccVar always co-occurs with varPtr in this polarity
-            // std::cerr << "Check if " << var_id_to_name(varState->id)
-            //           << " always co-occurs with " << var_id_to_name(tv->id)
-            //           << "\n";
+            // if (printDebug) {
+            //   std::cerr << "Check if " << var_id_to_name(varState->id)
+            //             << " always co-occurs with " <<
+            //             var_id_to_name(tv->id)
+            //             << "\n";
+            // }
             PolarVar coOccKey{coOccPtr, pol};
             auto coOccOccIt = coOccurrences.find(coOccKey);
 
@@ -1042,6 +1051,12 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
                                     coOccOccIt->second.variables.end();
 
               if (alwaysCoOccurs) {
+                if (printDebug) {
+                  std::cerr << "In polarity " << pol << ", "
+                            << var_id_to_name(varState->id)
+                            << " always co-occurs with "
+                            << var_id_to_name(tv->id) << "\n";
+                }
                 // Unify coOccPtr into varPtr
                 varSubst[coOccPtr] = varPtr;
 
@@ -1106,8 +1121,14 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty) {
             for (const auto &oppPrim : oppOccIt->second.primitives) {
               if (auto oppP = oppPrim->getAsTPrimitive()) {
                 if (oppP->name == p->name) {
-                  // Variable always occurs with the same primitive in both
-                  // polarities Remove the variable
+                  if (printDebug) {
+                    std::cerr
+                        << "Variable "
+                        << var_id_to_name(varPtr->getAsVariableState()->id)
+                        << " always occurs with the primitive " << p->name
+                        << " in both polarities";
+                  }
+                  // Remove the variable
                   varSubst[varPtr] = std::nullopt;
                   goto next_var; // Break out of all nested loops for this
                                  // variable
@@ -1233,8 +1254,7 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty) {
           components.push_back(boundType);
         } else {
           // Regular variable
-          components.push_back(
-              make_utypevariable(var_id_to_name(vs->id)));
+          components.push_back(make_utypevariable(var_id_to_name(vs->id)));
         }
       }
     }

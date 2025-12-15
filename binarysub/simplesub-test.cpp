@@ -30,13 +30,13 @@ UTypePtr simplifyType(SimpleType ty, bool printDebug) {
   }
 
   // Process through the pipeline
-  auto compact = compactType(ty);
+  auto compact = canonicalizeType(ty);
   if (printDebug) {
     std::cout << "✓ Compacted successfully\n";
     printCompactTypeScheme(compact, "CompactType before simplification");
   }
 
-  auto simplified = simplifyType(compact);
+  auto simplified = simplifyType(compact, printDebug);
   if (printDebug) {
     std::cout << "✓ Simplified successfully\n";
     printCompactTypeScheme(simplified, "CompactType after simplification");
@@ -54,7 +54,7 @@ UTypePtr simplifyType(SimpleType ty, bool printDebug) {
 
 UTypePtr getTypeForExpr(const char *str, bool printDebug) {
   using namespace simplesub;
-    if (printDebug) {
+  if (printDebug) {
     std::cout << "[#] getTypeForExpr: infer type for: " << str << "\n";
   }
   auto [rest, term1] = parseTerm(str);
@@ -146,8 +146,13 @@ void doTestProgram(const char *str, const std::vector<const char *> &expected) {
     VarSupply supply;
     auto ty = polyTy.body;
 
-    std::cout << "Simplifying type for definition " << i << ": "<< std::get<2>(pgrm.defs[i])->str() << "...\n";
+    std::cout << "Simplifying type for definition " << i << ": "
+              << std::get<2>(pgrm.defs[i])->str() << "...\n";
 
+    if (i == 5) {
+      std::cout << "here\n";
+      printDebug = true;
+    }
     // Simplify the type
     auto final = simplifyType(ty, printDebug);
 

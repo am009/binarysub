@@ -1,8 +1,8 @@
 #ifndef BINARYSUB_H
 #define BINARYSUB_H
 
-#include "binarysub-core.h"
 #include "binarysub-core-cmp.h"
+#include "binarysub-core.h"
 #include "binarysub-utils.h"
 
 #include <cassert>
@@ -160,7 +160,8 @@ UTypePtr coalesceType(const SimpleType &st);
 // Simplification functions
 CompactTypeScheme compactType(const SimpleType &st);
 CompactTypeScheme canonicalizeType(const SimpleType &st);
-CompactTypeScheme simplifyType(const CompactTypeScheme &ty);
+CompactTypeScheme simplifyType(const CompactTypeScheme &ty,
+                               bool printDebug = false);
 // Coalesces a CompactTypeScheme into a Type while performing hash-consing
 UTypePtr coalesceCompactType(const CompactTypeScheme &st);
 

@@ -17,7 +17,8 @@ private:
   E error_;
 };
 
-template <typename E> unexpected<typename std::decay<E>::type> make_unexpected(E &&error) {
+template <typename E>
+unexpected<typename std::decay<E>::type> make_unexpected(E &&error) {
   return unexpected<typename std::decay<E>::type>(std::forward<E>(error));
 }
 
