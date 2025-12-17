@@ -18,6 +18,9 @@ struct VarSupply {
   std::uint32_t fresh_id() { return next++; };
 };
 
+// Global variable supply
+extern VarSupply globalVarSupply;
+
 struct Scope {
   int level = 0;
   void enter() { ++level; };
@@ -105,12 +108,12 @@ inline SimpleType make_primitive(std::string name) {
   return std::make_shared<TypeNode>(TPrimitive{std::move(name)});
 }
 
-inline SimpleType make_variable(std::uint32_t id, int lvl) {
-  return std::make_shared<TypeNode>(VariableState(id, lvl));
+inline SimpleType make_variable(int lvl) {
+  return std::make_shared<TypeNode>(VariableState(globalVarSupply.fresh_id(), lvl));
 }
 
-inline SimpleType fresh_variable(VarSupply &vs, int lvl) {
-  return make_variable(vs.fresh_id(), lvl);
+inline SimpleType fresh_variable(int lvl) {
+  return make_variable(lvl);
 }
 
 inline SimpleType make_function(std::vector<SimpleType> args,
@@ -148,11 +151,10 @@ using Cache = std::set<std::pair<const TypeNode *, const TypeNode *>>;
 
 // ======================= Subtype constraint solver with levels =============
 expected<void, Error> constrain(const SimpleType &lhs, const SimpleType &rhs,
-                                Cache &cache, VarSupply &supply);
+                                Cache &cache);
 
 expected<void, Error> constrain_impl(const SimpleType &lhs,
-                                     const SimpleType &rhs, Cache &cache,
-                                     VarSupply &supply);
+                                     const SimpleType &rhs, Cache &cache);
 
 // ======================= Extrusion (level-fixing copy) =====================
 struct PolarVar {
@@ -170,8 +172,7 @@ struct PolarVar {
 // make a copy of the problematic type such that the copy has the requested
 // level and soundly approximates the original type.
 SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
-                   std::map<PolarVar, SimpleType> &cache,
-                   VarSupply &supply);
+                   std::map<PolarVar, SimpleType> &cache);
 
 } // namespace binarysub
 

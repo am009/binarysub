@@ -34,7 +34,7 @@ struct TypeScheme {
   explicit TypeScheme(PolymorphicType pt) : v(std::move(pt)) {}
 
   // Instantiate the type scheme at a given level
-  binarysub::SimpleType instantiate(int lvl, binarysub::VarSupply &supply);
+  binarysub::SimpleType instantiate(int lvl);
 
   template <typename T> T *getAs() { return std::get_if<T>(&v); }
 
@@ -63,7 +63,6 @@ public:
   const Ctx &getBuiltins() const { return builtins; }
 
 private:
-  binarysub::VarSupply supply;
   binarysub::Scope scope;
   Ctx builtins;
 

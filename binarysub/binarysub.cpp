@@ -211,24 +211,23 @@ void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence) {
 
 // ============= Type schemes implementation =================
 SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
-                             std::map<SimpleType, SimpleType> &memo,
-                             VarSupply &supply) {
+                             std::map<SimpleType, SimpleType> &memo) {
   if (t->isTPrimitive()) {
     return t;
   } else if (auto n = t->getAsTFunction()) {
     std::vector<SimpleType> args;
     args.reserve(n->args.size());
     for (auto const &a : n->args)
-      args.push_back(freshen_above_rec(a, cutoff, at_level, memo, supply));
+      args.push_back(freshen_above_rec(a, cutoff, at_level, memo));
     return make_function(
         std::move(args),
-        freshen_above_rec(n->result, cutoff, at_level, memo, supply));
+        freshen_above_rec(n->result, cutoff, at_level, memo));
   } else if (auto n = t->getAsTRecord()) {
     std::vector<std::pair<std::string, SimpleType>> fs;
     fs.reserve(n->fields.size());
     for (auto const &[name, sub] : n->fields)
       fs.emplace_back(name,
-                      freshen_above_rec(sub, cutoff, at_level, memo, supply));
+                      freshen_above_rec(sub, cutoff, at_level, memo));
     return make_record(std::move(fs));
   } else if (auto n = t->getAsVariableState()) {
     // VariableState
@@ -236,7 +235,7 @@ SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
       if (auto it = memo.find(t); it != memo.end())
         return it->second;
       auto fresh =
-          fresh_variable(supply, at_level); // empty bounds, new id/level
+          fresh_variable(at_level); // empty bounds, new id/level
       memo.emplace(t, fresh);
       return fresh;
     }
@@ -246,12 +245,12 @@ SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
   }
 }
 
-SimpleType instantiate(const TypeScheme &sch, int at_level, VarSupply &supply) {
+SimpleType instantiate(const TypeScheme &sch, int at_level) {
   if (auto m = std::get_if<MonoScheme>(&sch))
     return m->body;
   auto const &p = std::get<PolyScheme>(sch);
   std::map<SimpleType, SimpleType> memo;
-  return freshen_above_rec(p.body, p.generalized_above, at_level, memo, supply);
+  return freshen_above_rec(p.body, p.generalized_above, at_level, memo);
 }
 
 // Helper to wrap a rhs type at let generalization point
@@ -699,7 +698,6 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       recursive;
   std::map<SimpleType, std::shared_ptr<CompactType>, SimpleTypeValueCompare>
       recVars;
-  VarSupply freshSupply;
 
   // Helper lambda to create CompactType with specific components
   auto make_compact =
@@ -787,7 +785,7 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       // Recursive case
       auto it = recursive.find(pty);
       if (it == recursive.end()) {
-        auto freshVar = make_variable(freshSupply.fresh_id(), 0);
+        auto freshVar = make_variable(0);
         recursive[pty] = freshVar;
         return make_compact({freshVar});
       } else {
@@ -1137,8 +1135,6 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   }
 
   // Step 3: Reconstruct the type with substitutions applied
-  VarSupply freshSupply;
-
   std::function<std::shared_ptr<CompactType>(std::shared_ptr<CompactType>)>
       reconstruct =
           [&](std::shared_ptr<CompactType> ty) -> std::shared_ptr<CompactType> {

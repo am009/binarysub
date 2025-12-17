@@ -7,8 +7,7 @@ namespace simplesub {
 
 // ======================= TypeScheme Implementation ========================
 
-binarysub::SimpleType TypeScheme::instantiate(int lvl,
-                                              binarysub::VarSupply &supply) {
+binarysub::SimpleType TypeScheme::instantiate(int lvl) {
   if (auto *st = std::get_if<binarysub::SimpleType>(&v)) {
     return *st;
   } else if (auto *pt = std::get_if<PolymorphicType>(&v)) {
@@ -37,7 +36,7 @@ Typer::Typer() {
       IntType, binarysub::make_function(IntType, IntType)));
 
   // if: bool -> 'a -> 'a -> 'a
-  auto v = binarysub::fresh_variable(supply, 1);
+  auto v = binarysub::fresh_variable(1);
   builtins["if"] = TypeScheme(PolymorphicType(
       0, binarysub::make_function(
              BoolType,
@@ -60,7 +59,7 @@ Typer::inferTypes(const Pgrm &pgrm, const Ctx &ctx) {
       current_ctx.insert_or_assign(name, TypeScheme(ty_sch.value()));
     } else {
       // On error, add a fresh variable to continue type checking
-      current_ctx[name] = TypeScheme(binarysub::fresh_variable(supply, 0));
+      current_ctx[name] = TypeScheme(binarysub::fresh_variable(0));
     }
 
     results.push_back(std::move(ty_sch));
@@ -81,7 +80,7 @@ Typer::typeLetRhs(bool isRec, const std::string &name, const TermPtr &rhs,
 
   if (isRec) {
     // For recursive bindings, create a fresh variable and add it to context
-    auto e_ty = binarysub::fresh_variable(supply, lvl + 1);
+    auto e_ty = binarysub::fresh_variable(lvl + 1);
     Ctx new_ctx = ctx;
     new_ctx[name] = TypeScheme(e_ty);
 
@@ -92,7 +91,7 @@ Typer::typeLetRhs(bool isRec, const std::string &name, const TermPtr &rhs,
 
     auto ty = ty_result.value();
     binarysub::Cache cache;
-    auto constrain_result = binarysub::constrain(ty, e_ty, cache, supply);
+    auto constrain_result = binarysub::constrain(ty, e_ty, cache);
     if (!constrain_result.has_value()) {
       return binarysub::make_unexpected(constrain_result.error());
     }
@@ -125,7 +124,7 @@ Typer::freshenAbove(int lim, const binarysub::SimpleType &ty, int lvl) {
         return it->second;
       }
 
-      auto v = binarysub::fresh_variable(supply, lvl);
+      auto v = binarysub::fresh_variable(lvl);
       freshened[vs] = v;
 
       auto *new_vs = v->getAsVariableState();
@@ -185,7 +184,7 @@ Typer::typeTerm(const TermPtr &term, const Ctx &ctx, int lvl) {
 
   } else if (auto *lam = std::get_if<Lam>(&term->v)) {
     // Lambda: fun name -> body
-    auto param = binarysub::fresh_variable(supply, lvl);
+    auto param = binarysub::fresh_variable(lvl);
     Ctx new_ctx = ctx;
     new_ctx[lam->name] = TypeScheme(param);
 
@@ -208,13 +207,13 @@ Typer::typeTerm(const TermPtr &term, const Ctx &ctx, int lvl) {
       return binarysub::make_unexpected(a_ty_result.error());
     }
 
-    auto res = binarysub::fresh_variable(supply, lvl);
+    auto res = binarysub::fresh_variable(lvl);
     auto f_ty = f_ty_result.value();
     auto a_ty = a_ty_result.value();
 
     binarysub::Cache cache;
     auto constrain_result = binarysub::constrain(
-        f_ty, binarysub::make_function(a_ty, res), cache, supply);
+        f_ty, binarysub::make_function(a_ty, res), cache);
 
     if (!constrain_result.has_value()) {
       return binarysub::make_unexpected(constrain_result.error());
@@ -233,14 +232,13 @@ Typer::typeTerm(const TermPtr &term, const Ctx &ctx, int lvl) {
       return binarysub::make_unexpected(obj_ty_result.error());
     }
 
-    auto res = binarysub::fresh_variable(supply, lvl);
+    auto res = binarysub::fresh_variable(lvl);
     std::vector<std::pair<std::string, binarysub::SimpleType>> fields;
     fields.push_back({sel->fieldName, res});
 
     binarysub::Cache cache;
     auto constrain_result = binarysub::constrain(
-        obj_ty_result.value(), binarysub::make_record(std::move(fields)), cache,
-        supply);
+        obj_ty_result.value(), binarysub::make_record(std::move(fields)), cache);
 
     if (!constrain_result.has_value()) {
       return binarysub::make_unexpected(constrain_result.error());

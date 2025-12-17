@@ -4,6 +4,9 @@
 
 namespace binarysub {
 
+// Define the global variable supply
+VarSupply globalVarSupply;
+
 // compute the max level contained in a type (lazy in paper; direct here)
 int level_of(const SimpleType &st) {
   if (st->isTPrimitive()) {
@@ -27,8 +30,7 @@ int level_of(const SimpleType &st) {
 
 // ======================= Extrusion implementation =====================
 SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
-                   std::map<PolarVar, SimpleType> &cache,
-                   VarSupply &supply) {
+                   std::map<PolarVar, SimpleType> &cache) {
   if (level_of(ty) <= lvl)
     return ty;
 
@@ -39,8 +41,8 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
     std::vector<SimpleType> newArgs;
     newArgs.reserve(f->args.size());
     for (auto const &a : f->args)
-      newArgs.push_back(extrude(a, !pol, lvl, cache, supply));
-    auto r = extrude(f->result, pol, lvl, cache, supply);
+      newArgs.push_back(extrude(a, !pol, lvl, cache));
+    auto r = extrude(f->result, pol, lvl, cache);
     return make_function(std::move(newArgs), std::move(r));
   }
 
@@ -48,7 +50,7 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
     std::vector<std::pair<std::string, SimpleType>> fs;
     fs.reserve(r->fields.size());
     for (auto const &[n, t] : r->fields) {
-      fs.emplace_back(n, extrude(t, pol, lvl, cache, supply));
+      fs.emplace_back(n, extrude(t, pol, lvl, cache));
     }
     return make_record(std::move(fs));
   }
@@ -62,7 +64,7 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
   }
 
   // Make a copy at requested level
-  auto nvs = make_variable(supply.fresh_id(), lvl);
+  auto nvs = make_variable(lvl);
   cache.emplace(key, nvs);
   auto nvs_vs = nvs->getAsVariableState();
 
@@ -72,14 +74,14 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
     vs->upperBounds.push_back(nvs);
     nvs_vs->lowerBounds.reserve(vs->lowerBounds.size());
     for (auto const &lb : vs->lowerBounds)
-      nvs_vs->lowerBounds.push_back(extrude(lb, pol, lvl, cache, supply));
+      nvs_vs->lowerBounds.push_back(extrude(lb, pol, lvl, cache));
   } else {
     // negative: copy uppers to the new var; old var lower-bounds include the
     // new var
     vs->lowerBounds.push_back(nvs);
     nvs_vs->upperBounds.reserve(vs->upperBounds.size());
     for (auto const &ub : vs->upperBounds)
-      nvs_vs->upperBounds.push_back(extrude(ub, pol, lvl, cache, supply));
+      nvs_vs->upperBounds.push_back(extrude(ub, pol, lvl, cache));
   }
   return nvs;
 }
@@ -87,11 +89,10 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
 // ======================= Subtype constraint solver implementation
 expected<void, Error> constrain_impl(
     const SimpleType &lhs, const SimpleType &rhs, Cache &cache,
-    VarSupply &supply,
     std::function<void(const SimpleType &, const SimpleType &)> AddToWorklist);
 
 expected<void, Error> constrain(const SimpleType &lhs, const SimpleType &rhs,
-                                Cache &cache, VarSupply &supply) {
+                                Cache &cache) {
   // Worklist用于存储待处理的约束对
   std::vector<std::pair<SimpleType, SimpleType>> worklist;
 
@@ -118,7 +119,7 @@ expected<void, Error> constrain(const SimpleType &lhs, const SimpleType &rhs,
     cache.insert(key);
 
     // 处理当前约束，将新产生的约束加入worklist
-    if (auto result = constrain_impl(current_lhs, current_rhs, cache, supply,
+    if (auto result = constrain_impl(current_lhs, current_rhs, cache,
                                      AddToWorklist);
         !result) {
       return result;
@@ -130,7 +131,6 @@ expected<void, Error> constrain(const SimpleType &lhs, const SimpleType &rhs,
 
 expected<void, Error> constrain_impl(
     const SimpleType &lhs, const SimpleType &rhs, Cache &cache,
-    VarSupply &supply,
     std::function<void(const SimpleType &, const SimpleType &)> AddToWorklist) {
   // 处理基本类型
   if (auto lp = lhs->getAsTPrimitive()) {
@@ -190,7 +190,7 @@ expected<void, Error> constrain_impl(
     // make a copy of the problematic type such that the copy has the requested
     // level and soundly approximates the original type.
     std::map<PolarVar, SimpleType> ex;
-    auto rhs_ex = extrude(rhs, /*pol=*/false, lv->level, ex, supply);
+    auto rhs_ex = extrude(rhs, /*pol=*/false, lv->level, ex);
     // 将extrude后的约束加入worklist
     AddToWorklist(lhs, rhs_ex);
     return expected<void, Error>{};
@@ -208,7 +208,7 @@ expected<void, Error> constrain_impl(
     }
     // else extrude lhs down to rhs.level (positive polarity) and retry
     std::map<PolarVar, SimpleType> ex;
-    auto lhs_ex = extrude(lhs, /*pol=*/true, rv->level, ex, supply);
+    auto lhs_ex = extrude(lhs, /*pol=*/true, rv->level, ex);
     // 将extrude后的约束加入worklist
     AddToWorklist(lhs_ex, rhs);
     return expected<void, Error>{};

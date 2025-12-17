@@ -212,10 +212,9 @@ struct PolyScheme {
 using TypeScheme = std::variant<MonoScheme, PolyScheme>;
 
 SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
-                             std::map<SimpleType, SimpleType> &memo,
-                             VarSupply &supply);
+                             std::map<SimpleType, SimpleType> &memo);
 
-SimpleType instantiate(const TypeScheme &sch, int at_level, VarSupply &supply);
+SimpleType instantiate(const TypeScheme &sch, int at_level);
 
 TypeScheme generalize(const SimpleType &rhs, int env_level);
 
