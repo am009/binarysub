@@ -111,27 +111,57 @@ UTypePtr normalizeVariableNames(const UTypePtr &ty);
 
 // =================== Type Simplification ===========================
 
-// Custom comparator for SimpleType that compares by value instead of pointer
-// address
-struct SimpleTypeValueCompare {
-  bool operator()(const SimpleType &lhs, const SimpleType &rhs) const {
-    return compareSimpleType(lhs, rhs);
-  }
-};
 
 // Intermediate representation for simplification (Section 4.4)
 struct CompactType {
-  std::set<SimpleType> vars;                          // type variables
-  std::set<SimpleType, SimpleTypeValueCompare> prims; // primitive types
+  SimpleTypeSet vars;  // type variables
+  SimpleTypeSet prims; // primitive types
   std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
       record; // record fields
-  std::optional<std::pair<std::vector<std::shared_ptr<CompactType>>, std::shared_ptr<CompactType>>>
+  std::optional<std::pair<std::vector<std::shared_ptr<CompactType>>,
+                          std::shared_ptr<CompactType>>>
       function; // function type
+
+  bool operator<(const CompactType &other) const;
+  bool operator==(const CompactType &other) const {
+    return !(*this < other) && !(other < *this);
+  }
+  bool operator!=(const CompactType &other) const { return !(*this == other); }
 };
+
+inline bool compareCompactTypePtr(const std::shared_ptr<CompactType> &lhs,
+                           const std::shared_ptr<CompactType> &rhs) {
+  if (!lhs && !rhs)
+    return false;
+  if (!lhs)
+    return true;
+  if (!rhs)
+    return false;
+  return *lhs < *rhs;
+}
+
+struct CompactTypePtrCompare {
+  bool operator()(const std::shared_ptr<CompactType> &lhs,
+                  const std::shared_ptr<CompactType> &rhs) const {
+    return compareCompactTypePtr(lhs, rhs);
+  }
+};
+
+struct PolarCompactTypePtrCompare {
+  bool operator()(const std::pair<std::shared_ptr<CompactType>, bool> &lhs,
+                  const std::pair<std::shared_ptr<CompactType>, bool> &rhs) const {
+    if (lhs.second != rhs.second) {
+      return lhs.second < rhs.second;
+    }
+    return compareCompactTypePtr(lhs.first, rhs.first);
+  }
+};
+
+using PolarCompactTypeSet = std::set<std::pair<std::shared_ptr<CompactType>, bool>, PolarCompactTypePtrCompare>;
 
 struct CompactTypeScheme {
   std::shared_ptr<CompactType> cty;
-  std::map<SimpleType, std::shared_ptr<CompactType>>
+  std::map<SimpleType, std::shared_ptr<CompactType>, SimpleTypeValueCompare>
       recVars; // recursive variable bounds
 };
 
@@ -146,8 +176,9 @@ std::string toString(const CompactType &ct);
 
 // Co-occurrence analysis data structures
 struct OccurrenceData {
-  std::set<SimpleType> variables;  // Only variable types
-  std::set<SimpleType> primitives; // Only primitive types
+  SimpleTypeSet variables; // Only variable types
+  SimpleTypeSet
+      primitives; // Only primitive types
 };
 using OccurrenceMap = std::map<PolarVar, OccurrenceData>;
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &ty);

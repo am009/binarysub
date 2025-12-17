@@ -276,6 +276,94 @@ std::uint32_t extractVariableId(const std::string &varName) {
 
 // ======================= CompactType Implementation =======================
 
+bool CompactType::operator<(const CompactType &other) const {
+  // Compare vars first
+  if (vars < other.vars) {
+    return true;
+  }
+  if (other.vars < vars) {
+    return false;
+  }
+
+  // Compare prims
+  if (prims < other.prims) {
+    return true;
+  }
+  if (other.prims < prims) {
+    return false;
+  }
+
+  // Compare record
+  if (!record && other.record)
+    return true;
+  if (record && !other.record)
+    return false;
+
+  if (record && other.record) {
+    auto it1 = record->begin();
+    auto it2 = other.record->begin();
+    auto end1 = record->end();
+    auto end2 = other.record->end();
+
+    while (it1 != end1 && it2 != end2) {
+      // Compare keys
+      if (it1->first < it2->first)
+        return true;
+      if (it2->first < it1->first)
+        return false;
+
+      // Keys equal, compare values (dereference shared_ptrs)
+      if (*it1->second < *it2->second)
+        return true;
+      if (*it2->second < *it1->second)
+        return false;
+
+      ++it1;
+      ++it2;
+    }
+
+    // If one map is a prefix of the other
+    if (it1 == end1 && it2 != end2)
+      return true;
+    if (it1 != end1 && it2 == end2)
+      return false;
+  }
+
+  // Compare function
+  if (!function && other.function)
+    return true;
+  if (function && !other.function)
+    return false;
+
+  if (function && other.function) {
+    const auto &args1 = function->first;
+    const auto &args2 = other.function->first;
+
+    // Compare argument counts
+    if (args1.size() < args2.size())
+      return true;
+    if (args1.size() > args2.size())
+      return false;
+
+    // Compare arguments element by element
+    for (size_t i = 0; i < args1.size(); ++i) {
+      if (*args1[i] < *args2[i])
+        return true;
+      if (*args2[i] < *args1[i])
+        return false;
+    }
+
+    // Compare result types
+    if (*function->second < *other.function->second)
+      return true;
+    if (*other.function->second < *function->second)
+      return false;
+  }
+
+  // All fields are equal
+  return false;
+}
+
 // Helper function to merge two CompactTypes based on polarity
 std::shared_ptr<CompactType>
 merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
@@ -328,10 +416,12 @@ merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
   if (lhs->function && rhs->function) {
     // Merge argument vectors element-wise
     std::vector<std::shared_ptr<CompactType>> mergedArgs;
-    size_t maxArgs = std::max(lhs->function->first.size(), rhs->function->first.size());
+    size_t maxArgs =
+        std::max(lhs->function->first.size(), rhs->function->first.size());
     for (size_t i = 0; i < maxArgs; ++i) {
       if (i < lhs->function->first.size() && i < rhs->function->first.size()) {
-        mergedArgs.push_back(merge_compact_types(!pol, lhs->function->first[i], rhs->function->first[i]));
+        mergedArgs.push_back(merge_compact_types(!pol, lhs->function->first[i],
+                                                 rhs->function->first[i]));
       } else if (i < lhs->function->first.size()) {
         mergedArgs.push_back(lhs->function->first[i]);
       } else {
@@ -421,7 +511,8 @@ std::string toString(const CompactType &ct) {
     std::ostringstream funOss;
     funOss << "(";
     for (size_t i = 0; i < ct.function->first.size(); ++i) {
-      if (i > 0) funOss << ", ";
+      if (i > 0)
+        funOss << ", ";
       funOss << toString(*ct.function->first[i]);
     }
     funOss << " → " << toString(*ct.function->second) << ")";
@@ -601,119 +692,18 @@ UTypePtr coalesceType(const SimpleType &st) {
 
 // ======================= Type Simplification Functions =======================
 
-CompactTypeScheme compactType(const SimpleType &st) {
-  std::map<PolarVar, SimpleType> recursive;
-  std::map<SimpleType, std::shared_ptr<CompactType>> recVars;
-  VarSupply freshSupply; // For creating fresh variables when needed
-
-  auto empty_compact = make_empty_compact_type();
-
-  // Helper lambda to create CompactType with specific components
-  auto make_compact =
-      [](std::set<SimpleType> vars = {},
-         std::set<SimpleType, SimpleTypeValueCompare> prims = {},
-         std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
-             rec = std::nullopt,
-         std::optional<std::pair<std::vector<std::shared_ptr<CompactType>>,
-                                 std::shared_ptr<CompactType>>>
-             fun = std::nullopt) {
-        auto ct = std::make_shared<CompactType>();
-        ct->vars = std::move(vars);
-        ct->prims = std::move(prims);
-        ct->record = std::move(rec);
-        ct->function = std::move(fun);
-        return ct;
-      };
-
-  std::function<std::shared_ptr<CompactType>(
-      const SimpleType &, bool, std::set<SimpleType>,
-      std::set<PolarVar> &)>
-      go = [&](const SimpleType &ty, bool pol,
-               std::set<SimpleType> parents,
-               std::set<PolarVar> &inProcess) -> std::shared_ptr<CompactType> {
-    if (ty->isTPrimitive()) {
-      return make_compact({}, {ty});
-    } else if (auto n = ty->getAsTFunction()) {
-      std::vector<std::shared_ptr<CompactType>> argCTs;
-      for (const auto &arg : n->args) {
-        argCTs.push_back(go(arg, !pol, {}, inProcess));
-      }
-      auto resCT = go(n->result, pol, {}, inProcess);
-      return make_compact({}, {}, std::nullopt, std::make_pair(argCTs, resCT));
-    } else if (auto n = ty->getAsTRecord()) {
-      std::map<std::string, std::shared_ptr<CompactType>> fields;
-      for (const auto &[name, fieldType] : n->fields) {
-        fields[name] = go(fieldType, pol, {}, inProcess);
-      }
-      return make_compact({}, {}, fields);
-    } else if (auto n = ty->getAsVariableState()) {
-      const auto &bounds = pol ? n->lowerBounds : n->upperBounds;
-      PolarVar tv_pol{ty, pol};
-
-      if (inProcess.count(tv_pol)) {
-        if (parents.count(ty)) {
-          // Spurious cycle: ignore the bound
-          return make_compact();
-        } else {
-          // Create recursive variable
-          auto it = recursive.find(tv_pol);
-          if (it == recursive.end()) {
-            auto freshVar = make_variable(freshSupply.fresh_id(), 0);
-            recursive[tv_pol] = freshVar;
-            return make_compact({freshVar});
-          } else {
-            return make_compact({it->second});
-          }
-        }
-      } else {
-        auto newInProcess = inProcess;
-        newInProcess.insert(tv_pol);
-        auto newParents = parents;
-        newParents.insert(ty);
-
-        // Start with the variable itself
-        auto bound = make_compact({ty});
-
-        // Merge all bounds
-        for (const auto &b : bounds) {
-          auto boundCompact = go(b, pol, newParents, newInProcess);
-          bound = merge_compact_types(pol, bound, boundCompact);
-        }
-
-        // Check if we created a recursive variable
-        auto recIt = recursive.find(tv_pol);
-        if (recIt != recursive.end()) {
-          auto fresh_var_type = recIt->second;
-          recVars[fresh_var_type] = bound;
-          return make_compact({fresh_var_type});
-        } else {
-          return bound;
-        }
-      }
-    } else {
-      assert(false && "Unhandled variant type in compactType");
-    }
-  };
-
-  std::set<PolarVar> inProcess;
-  auto compactTerm = go(st, true, {}, inProcess);
-
-  return CompactTypeScheme{compactTerm, recVars};
-}
-
 // https://github.com/LPTK/simple-sub/blob/406e292f349430938de6c612494fd518c4636a84/shared/src/main/scala/simplesub/TypeSimplifier.scala#L102
 CompactTypeScheme canonicalizeType(const SimpleType &st) {
-  std::map<std::pair<std::shared_ptr<CompactType>, bool>, SimpleType>
+  std::map<std::pair<std::shared_ptr<CompactType>, bool>, SimpleType,
+           PolarCompactTypePtrCompare>
       recursive;
-  std::map<SimpleType, std::shared_ptr<CompactType>> recVars;
+  std::map<SimpleType, std::shared_ptr<CompactType>, SimpleTypeValueCompare>
+      recVars;
   VarSupply freshSupply;
-
-  auto empty_compact = make_empty_compact_type();
 
   // Helper lambda to create CompactType with specific components
   auto make_compact =
-      [](std::set<SimpleType> vars = {},
-         std::set<SimpleType, SimpleTypeValueCompare> prims = {},
+      [](SimpleTypeSet vars = {}, SimpleTypeSet prims = {},
          std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
              rec = std::nullopt,
          std::optional<std::pair<std::vector<std::shared_ptr<CompactType>>,
@@ -728,18 +718,19 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       };
 
   // Close over function to find all connected variables
-  // Respects polarity: follows lowerBounds when pol=true, upperBounds when pol=false
-  std::function<std::set<SimpleType>(std::set<SimpleType>, bool)>
-      closeOver = [&](std::set<SimpleType> initial, bool pol)
-      -> std::set<SimpleType> {
-    std::set<SimpleType> done = initial;
-    std::set<SimpleType> workSet = initial;
+  // Respects polarity: follows lowerBounds when pol=true, upperBounds when
+  // pol=false
+  std::function<SimpleTypeSet(SimpleTypeSet, bool)> closeOver =
+      [&](SimpleTypeSet initial, bool pol) -> SimpleTypeSet {
+    SimpleTypeSet done = initial;
+    SimpleTypeSet workSet = initial;
 
     while (!workSet.empty()) {
       auto current_ty = *workSet.begin();
       workSet.erase(workSet.begin());
       auto current = current_ty->getAsVariableState();
-      if (!current) continue;
+      if (!current)
+        continue;
 
       // Add variables from bounds (polarity-sensitive)
       const auto &bounds = pol ? current->lowerBounds : current->upperBounds;
@@ -782,12 +773,11 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
   };
 
   // Merge bounds and traverse the result
-  std::function<std::shared_ptr<CompactType>(
-      std::shared_ptr<CompactType>, bool,
-      std::set<std::pair<std::shared_ptr<CompactType>, bool>> &)>
-      go1 = [&](std::shared_ptr<CompactType> ty, bool pol,
-                std::set<std::pair<std::shared_ptr<CompactType>, bool>>
-                    &inProcess) -> std::shared_ptr<CompactType> {
+  std::function<std::shared_ptr<CompactType>(std::shared_ptr<CompactType>, bool,
+                                             PolarCompactTypeSet &)>
+      go1 =
+          [&](std::shared_ptr<CompactType> ty, bool pol,
+              PolarCompactTypeSet &inProcess) -> std::shared_ptr<CompactType> {
     if (ty->vars.empty() && ty->prims.empty() && !ty->record && !ty->function) {
       return ty; // Empty type
     }
@@ -805,7 +795,7 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       }
     } else {
       // Collect bounds from all variables
-      auto bound = empty_compact;
+      auto bound = std::make_shared<CompactType>();
       for (const auto &var : ty->vars) {
         if (auto vs = var->getAsVariableState()) {
           const auto &bounds = pol ? vs->lowerBounds : vs->upperBounds;
@@ -842,9 +832,8 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
         for (const auto &arg : res->function->first) {
           adaptedArgs.push_back(go1(arg, !pol, newInProcess));
         }
-        adapted->function =
-            std::make_pair(adaptedArgs,
-                           go1(res->function->second, pol, newInProcess));
+        adapted->function = std::make_pair(
+            adaptedArgs, go1(res->function->second, pol, newInProcess));
       }
 
       // Check if we created a recursive variable
@@ -859,7 +848,7 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
     }
   };
 
-  std::set<std::pair<std::shared_ptr<CompactType>, bool>> inProcess;
+  PolarCompactTypeSet inProcess;
   auto term = go0(st, true);
   auto compactTerm = go1(term, true, inProcess);
 
@@ -876,8 +865,8 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
       [&](std::shared_ptr<CompactType> ty, bool pol) -> void {
     // std::cerr << "Visiting: " << toString(*ty) << "\n";
     // Collect variables and primitives separately
-    std::set<SimpleType> newVars;
-    std::set<SimpleType> newPrims;
+    SimpleTypeSet newVars;
+    SimpleTypeSet newPrims;
 
     // Add all variables
     for (const auto &var : ty->vars) {
@@ -890,7 +879,7 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
         auto it = coOccurrences.find(key);
         if (it != coOccurrences.end()) {
           // Compute intersection with existing occurrences for variables
-          std::set<SimpleType> varIntersection;
+          SimpleTypeSet varIntersection;
           std::set_intersection(
               it->second.variables.begin(), it->second.variables.end(),
               newVars.begin(), newVars.end(),
@@ -923,7 +912,7 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
         auto it = coOccurrences.find(key);
         if (it != coOccurrences.end()) {
           // Compute intersection with existing occurrences for primitives
-          std::set<SimpleType> primIntersection;
+          SimpleTypeSet primIntersection;
           std::set_intersection(
               it->second.primitives.begin(), it->second.primitives.end(),
               newPrims.begin(), newPrims.end(),
@@ -958,8 +947,8 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
 
 CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   // State accumulated during the analysis phase
-  std::set<SimpleType> allVars;
-  std::map<SimpleType, std::shared_ptr<CompactType>> recVars = cty.recVars;
+  SimpleTypeSet allVars;
+  auto recVars = cty.recVars;
   auto coOccurrences = analyzeOccurrences(cty);
 
   // This will be filled up after the analysis phase, to influence the
@@ -1088,7 +1077,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
                     if (oppVarIt != coOccurrences.end()) {
                       // Keep only variables that occur in both sets (plus
                       // varPtr itself)
-                      std::set<SimpleType> newVarOccs;
+                      SimpleTypeSet newVarOccs;
                       for (const auto &var : oppVarIt->second.variables) {
                         if (var == varPtr ||
                             oppCoOccIt->second.variables.count(var) > 0) {
@@ -1098,7 +1087,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
                       oppVarIt->second.variables = newVarOccs;
 
                       // Keep only primitives that occur in both sets
-                      std::set<SimpleType> newPrimOccs;
+                      SimpleTypeSet newPrimOccs;
                       for (const auto &prim : oppVarIt->second.primitives) {
                         if (oppCoOccIt->second.primitives.count(prim) > 0) {
                           newPrimOccs.insert(prim);
@@ -1190,8 +1179,8 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
       for (const auto &arg : ty->function->first) {
         reconstructedArgs.push_back(reconstruct(arg));
       }
-      result->function = std::make_pair(reconstructedArgs,
-                                        reconstruct(ty->function->second));
+      result->function =
+          std::make_pair(reconstructedArgs, reconstruct(ty->function->second));
     }
 
     return result;
@@ -1201,7 +1190,8 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   auto newTerm = reconstruct(cty.cty);
 
   // Reconstruct recursive variable bounds with substitutions applied
-  std::map<SimpleType, std::shared_ptr<CompactType>> newRecVars;
+  std::map<SimpleType, std::shared_ptr<CompactType>, SimpleTypeValueCompare>
+      newRecVars;
   for (const auto &[varPtr, bound] : recVars) {
     auto substIt = varSubst.find(varPtr);
     if (substIt == varSubst.end() || substIt->second.has_value()) {

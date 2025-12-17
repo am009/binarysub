@@ -92,6 +92,16 @@ inline bool compareSimpleType(const SimpleType &lhs, const SimpleType &rhs) {
   return *lhs < *rhs;
 }
 
+// Custom comparator for SimpleType that compares by value instead of pointer
+// address
+struct SimpleTypeValueCompare {
+  bool operator()(const SimpleType &lhs, const SimpleType &rhs) const {
+    return compareSimpleType(lhs, rhs);
+  }
+};
+
+using SimpleTypeSet = std::set<SimpleType, SimpleTypeValueCompare>;
+
 } // namespace binarysub
 
 #endif
