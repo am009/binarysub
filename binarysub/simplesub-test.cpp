@@ -41,7 +41,7 @@ UTypePtr simplifyType(SimpleType ty, bool printDebug) {
     std::cout << "✓ Simplified successfully\n";
     printCompactTypeScheme(simplified, "CompactType after simplification");
   }
-  auto final = coalesceCompactType(simplified);
+  auto final = coalesceCompactType(simplified, printDebug);
 
   // Normalize variable names to 'a, 'b, 'c, etc.
   auto normalized = normalizeVariableNames(final);
@@ -149,10 +149,10 @@ void doTestProgram(const char *str, const std::vector<const char *> &expected) {
     std::cout << "Simplifying type for definition " << i << ": "
               << std::get<2>(pgrm.defs[i])->str() << "...\n";
 
-    if (i == 5) {
-      std::cout << "here\n";
-      printDebug = true;
-    }
+    // if (i == 6) {
+    //   std::cout << "here\n";
+    //   printDebug = true;
+    // }
     // Simplify the type
     auto final = simplifyType(ty, printDebug);
 

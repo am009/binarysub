@@ -1,5 +1,8 @@
 #include "binarysub.h"
+#include "binarysub-core.h"
+#include <cassert>
 #include <functional>
+#include <memory>
 #include <numeric>
 #include <sstream>
 
@@ -14,19 +17,6 @@ std::string fresh_var_name() {
   std::uint32_t idx = var_name_counter++;
   std::uint32_t letter_idx = idx % 26;
   std::uint32_t suffix = idx / 26;
-
-  std::string name = "'";
-  name += static_cast<char>('a' + letter_idx);
-  if (suffix > 0) {
-    name += std::to_string(suffix);
-  }
-  return name;
-}
-
-// Convert a variable ID to a letter-based name
-std::string var_id_to_name(std::uint32_t id) {
-  std::uint32_t letter_idx = id % 26;
-  std::uint32_t suffix = id / 26;
 
   std::string name = "'";
   name += static_cast<char>('a' + letter_idx);
@@ -130,7 +120,12 @@ UTypePtr normalizeVariableNames(const UTypePtr &ty) {
             }
             return make_urecordtype(std::move(newFields));
           } else if constexpr (std::is_same_v<T, URecursiveType>) {
-            return make_urecursivetype(n.name, renameVars(n.body));
+            auto name = n.name;
+            auto it = nameMap.find(name);
+            if (it != nameMap.end()) {
+              name = it->second;
+            }
+            return make_urecursivetype(name, renameVars(n.body));
           } else {
             static_assert(!sizeof(T),
                           "Unhandled UType variant in normalizeVariableNames");
@@ -200,8 +195,8 @@ void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence) {
           }
           os << "}";
         } else if constexpr (std::is_same_v<T, URecursiveType>) {
-          os << "μ" << n.name << ".";
           printTypeImpl(n.body, os, 0);
+          os << " as " << n.name;
         } else {
           static_assert(!sizeof(T), "Unhandled UType variant in printTypeImpl");
         }
@@ -219,23 +214,20 @@ SimpleType freshen_above_rec(const SimpleType &t, int cutoff, int at_level,
     args.reserve(n->args.size());
     for (auto const &a : n->args)
       args.push_back(freshen_above_rec(a, cutoff, at_level, memo));
-    return make_function(
-        std::move(args),
-        freshen_above_rec(n->result, cutoff, at_level, memo));
+    return make_function(std::move(args),
+                         freshen_above_rec(n->result, cutoff, at_level, memo));
   } else if (auto n = t->getAsTRecord()) {
     std::vector<std::pair<std::string, SimpleType>> fs;
     fs.reserve(n->fields.size());
     for (auto const &[name, sub] : n->fields)
-      fs.emplace_back(name,
-                      freshen_above_rec(sub, cutoff, at_level, memo));
+      fs.emplace_back(name, freshen_above_rec(sub, cutoff, at_level, memo));
     return make_record(std::move(fs));
   } else if (auto n = t->getAsVariableState()) {
     // VariableState
     if (n->level > cutoff) {
       if (auto it = memo.find(t); it != memo.end())
         return it->second;
-      auto fresh =
-          fresh_variable(at_level); // empty bounds, new id/level
+      auto fresh = fresh_variable(at_level); // empty bounds, new id/level
       memo.emplace(t, fresh);
       return fresh;
     }
@@ -693,9 +685,7 @@ UTypePtr coalesceType(const SimpleType &st) {
 
 // https://github.com/LPTK/simple-sub/blob/406e292f349430938de6c612494fd518c4636a84/shared/src/main/scala/simplesub/TypeSimplifier.scala#L102
 CompactTypeScheme canonicalizeType(const SimpleType &st) {
-  std::map<std::pair<std::shared_ptr<CompactType>, bool>, SimpleType,
-           PolarCompactTypePtrCompare>
-      recursive;
+  PolarCompactTypeMap<SimpleType> recursive;
   std::map<SimpleType, std::shared_ptr<CompactType>, SimpleTypeValueCompare>
       recVars;
 
@@ -1203,30 +1193,56 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   return CompactTypeScheme{newTerm, newRecVars};
 }
 
-UTypePtr coalesceCompactType(const CompactTypeScheme &cty) {
-  std::map<std::pair<std::shared_ptr<CompactType>, bool>, std::string>
-      recursive;
-  static std::uint32_t recVarCounter = 0;
+UTypePtr coalesceCompactType(const CompactTypeScheme &cty, bool printDebug) {
+  PolarCompactTypeMap<std::string> recursive;
+
+  // Two aux funcs
+  // checking if the CompactType is only variable.
+  auto getOnlyVariable = [](CompactType &c) -> SimpleType {
+    if (c.prims.empty() && !c.record.has_value() && !c.function.has_value() &&
+        c.vars.size() == 1) {
+      return *c.vars.begin();
+    }
+    return nullptr;
+  };
+  // Create a compact type with only a variable.
+  auto fromOnlyVariable = [](SimpleType t) -> std::shared_ptr<CompactType> {
+    assert(t->isVariableState());
+    auto c = make_empty_compact_type();
+    c->vars.insert(t);
+    return c;
+  };
 
   std::function<UTypePtr(std::shared_ptr<CompactType>, bool,
-                         std::map<std::pair<std::shared_ptr<CompactType>, bool>,
-                                  std::function<UTypePtr()>> &)>
+                         PolarCompactTypeMap<std::function<UTypePtr()>> &)>
       go = [&](std::shared_ptr<CompactType> ty, bool pol,
-               std::map<std::pair<std::shared_ptr<CompactType>, bool>,
-                        std::function<UTypePtr()>> &inProcess) -> UTypePtr {
+               PolarCompactTypeMap<std::function<UTypePtr()>> &inProcess)
+      -> UTypePtr {
     auto key = std::make_pair(ty, pol);
     auto it = inProcess.find(key);
     if (it != inProcess.end()) {
       // Recursive case - this creates a recursive type
-      return it->second();
+      auto ret = it->second();
+      if (printDebug) {
+        std::cerr << "Recursive type detected: " << toString(*ty) << " = "
+                  << std::get<UTypeVariable>(ret->v).name << "\n";
+      }
+      return ret;
     }
+
+    static int recVarCounter = 0;
 
     bool isRecursive = false;
     std::string recVarName;
     std::function<UTypePtr()> recVarGetter = [&]() -> UTypePtr {
       isRecursive = true;
       if (recVarName.empty()) {
-        recVarName = "μ" + std::to_string(recVarCounter++);
+        auto ty1 = ty;
+        if (auto var = getOnlyVariable(*ty)) {
+          recVarName = var->getAsVariableState()->name();
+        } else {
+          recVarName = "μ" + std::to_string(recVarCounter++);
+        }
       }
       return make_utypevariable(recVarName);
     };
@@ -1234,66 +1250,73 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty) {
     auto newInProcess = inProcess;
     newInProcess[key] = recVarGetter;
 
-    // Build the type components
-    std::vector<UTypePtr> components;
+    UTypePtr result;
 
-    // Add variables (convert SimpleType variables to type variable names)
-    for (const auto &var : ty->vars) {
-      if (auto vs = var->getAsVariableState()) {
-        // Check if this is a recursive variable
-        auto recIt = cty.recVars.find(var);
-        if (recIt != cty.recVars.end()) {
-          // Recursive variable - process its bound
-          auto boundType = go(recIt->second, pol, newInProcess);
-          components.push_back(boundType);
-        } else {
+    if (auto var = getOnlyVariable(*ty)) {
+      // Check if this is a recursive variable
+      auto recIt = cty.recVars.find(var);
+      if (recIt != cty.recVars.end()) {
+        // Recursive variable - process its bound
+        auto boundType = go(recIt->second, pol, newInProcess);
+        result = boundType;
+      } else {
+        auto vs = var->getAsVariableState();
+        result = make_utypevariable(var_id_to_name(vs->id));
+      }
+    } else {
+
+      // Build the type components
+      std::vector<UTypePtr> components;
+
+      // Add variables (convert SimpleType variables to type variable names)
+      for (const auto &var : ty->vars) {
+        if (auto vs = var->getAsVariableState()) {
           // Regular variable
-          components.push_back(make_utypevariable(var_id_to_name(vs->id)));
+          components.push_back(go(fromOnlyVariable(var), pol, newInProcess));
         }
       }
-    }
 
-    // Add primitives
-    for (const auto &prim : ty->prims) {
-      if (auto p = prim->getAsTPrimitive()) {
-        components.push_back(make_uprimitivetype(p->name));
+      // Add primitives
+      for (const auto &prim : ty->prims) {
+        if (auto p = prim->getAsTPrimitive()) {
+          components.push_back(make_uprimitivetype(p->name));
+        }
       }
-    }
 
-    // Add record type
-    if (ty->record) {
-      std::vector<std::pair<std::string, UTypePtr>> fields;
-      for (const auto &[fieldName, fieldType] : *ty->record) {
-        fields.emplace_back(fieldName, go(fieldType, pol, newInProcess));
+      // Add record type
+      if (ty->record) {
+        std::vector<std::pair<std::string, UTypePtr>> fields;
+        for (const auto &[fieldName, fieldType] : *ty->record) {
+          fields.emplace_back(fieldName, go(fieldType, pol, newInProcess));
+        }
+        components.push_back(make_urecordtype(std::move(fields)));
       }
-      components.push_back(make_urecordtype(std::move(fields)));
-    }
 
-    // Add function type
-    if (ty->function) {
-      std::vector<UTypePtr> funArgs;
-      for (const auto &arg : ty->function->first) {
-        funArgs.push_back(go(arg, !pol, newInProcess));
+      // Add function type
+      if (ty->function) {
+        std::vector<UTypePtr> funArgs;
+        for (const auto &arg : ty->function->first) {
+          funArgs.push_back(go(arg, !pol, newInProcess));
+        }
+        auto rhs = go(ty->function->second, pol, newInProcess);
+        components.push_back(make_ufunctiontype(std::move(funArgs), rhs));
       }
-      auto rhs = go(ty->function->second, pol, newInProcess);
-      components.push_back(make_ufunctiontype(std::move(funArgs), rhs));
-    }
 
-    // Combine components based on polarity
-    UTypePtr result;
-    if (components.empty()) {
-      result = pol ? make_ubot() : make_utop();
-    } else if (components.size() == 1) {
-      result = components[0];
-    } else {
-      result = components[0];
-      for (size_t i = 1; i < components.size(); ++i) {
-        if (pol) {
-          // Positive: union
-          result = make_uunion(result, components[i]);
-        } else {
-          // Negative: intersection
-          result = make_uinter(result, components[i]);
+      // Combine components based on polarity
+      if (components.empty()) {
+        result = pol ? make_ubot() : make_utop();
+      } else if (components.size() == 1) {
+        result = components[0];
+      } else {
+        result = components[0];
+        for (size_t i = 1; i < components.size(); ++i) {
+          if (pol) {
+            // Positive: union
+            result = make_uunion(result, components[i]);
+          } else {
+            // Negative: intersection
+            result = make_uinter(result, components[i]);
+          }
         }
       }
     }
@@ -1306,9 +1329,7 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty) {
     }
   };
 
-  std::map<std::pair<std::shared_ptr<CompactType>, bool>,
-           std::function<UTypePtr()>>
-      inProcess;
+  PolarCompactTypeMap<std::function<UTypePtr()>> inProcess;
   return go(cty.cty, true, inProcess);
 }
 

@@ -31,6 +31,19 @@ struct Scope {
 struct TypeNode;
 using SimpleType = std::shared_ptr<TypeNode>;
 
+// Convert a variable ID to a letter-based name
+inline std::string var_id_to_name(std::uint32_t id) {
+  std::uint32_t letter_idx = id % 26;
+  std::uint32_t suffix = id / 26;
+
+  std::string name = "'";
+  name += static_cast<char>('a' + letter_idx);
+  if (suffix > 0) {
+    name += std::to_string(suffix);
+  }
+  return name;
+}
+
 struct VariableState {
   std::vector<SimpleType> lowerBounds;
   std::vector<SimpleType> upperBounds;
@@ -42,6 +55,9 @@ struct VariableState {
     if (id != other.id)
       return id < other.id;
     return level < other.level;
+  }
+  std::string name() const {
+    return var_id_to_name(id);
   }
 };
 

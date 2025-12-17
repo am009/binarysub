@@ -8,14 +8,12 @@
 #include <cassert>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 
 namespace binarysub {
-
-std::string fresh_var_name();
-std::string var_id_to_name(std::uint32_t id);
 
 // ======================= User-facing types ========================
 
@@ -111,7 +109,6 @@ UTypePtr normalizeVariableNames(const UTypePtr &ty);
 
 // =================== Type Simplification ===========================
 
-
 // Intermediate representation for simplification (Section 4.4)
 struct CompactType {
   SimpleTypeSet vars;  // type variables
@@ -130,7 +127,7 @@ struct CompactType {
 };
 
 inline bool compareCompactTypePtr(const std::shared_ptr<CompactType> &lhs,
-                           const std::shared_ptr<CompactType> &rhs) {
+                                  const std::shared_ptr<CompactType> &rhs) {
   if (!lhs && !rhs)
     return false;
   if (!lhs)
@@ -148,8 +145,9 @@ struct CompactTypePtrCompare {
 };
 
 struct PolarCompactTypePtrCompare {
-  bool operator()(const std::pair<std::shared_ptr<CompactType>, bool> &lhs,
-                  const std::pair<std::shared_ptr<CompactType>, bool> &rhs) const {
+  bool
+  operator()(const std::pair<std::shared_ptr<CompactType>, bool> &lhs,
+             const std::pair<std::shared_ptr<CompactType>, bool> &rhs) const {
     if (lhs.second != rhs.second) {
       return lhs.second < rhs.second;
     }
@@ -157,7 +155,12 @@ struct PolarCompactTypePtrCompare {
   }
 };
 
-using PolarCompactTypeSet = std::set<std::pair<std::shared_ptr<CompactType>, bool>, PolarCompactTypePtrCompare>;
+using PolarCompactTypeSet =
+    std::set<std::pair<std::shared_ptr<CompactType>, bool>,
+             PolarCompactTypePtrCompare>;
+template <typename T>
+using PolarCompactTypeMap =
+    std::map<std::pair<std::shared_ptr<CompactType>, bool>, T, PolarCompactTypePtrCompare>;
 
 struct CompactTypeScheme {
   std::shared_ptr<CompactType> cty;
@@ -176,9 +179,8 @@ std::string toString(const CompactType &ct);
 
 // Co-occurrence analysis data structures
 struct OccurrenceData {
-  SimpleTypeSet variables; // Only variable types
-  SimpleTypeSet
-      primitives; // Only primitive types
+  SimpleTypeSet variables;  // Only variable types
+  SimpleTypeSet primitives; // Only primitive types
 };
 using OccurrenceMap = std::map<PolarVar, OccurrenceData>;
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &ty);
@@ -193,7 +195,8 @@ CompactTypeScheme canonicalizeType(const SimpleType &st);
 CompactTypeScheme simplifyType(const CompactTypeScheme &ty,
                                bool printDebug = false);
 // Coalesces a CompactTypeScheme into a Type while performing hash-consing
-UTypePtr coalesceCompactType(const CompactTypeScheme &st);
+UTypePtr coalesceCompactType(const CompactTypeScheme &st,
+                             bool printDebug = false);
 
 // Simplification transformations
 CompactTypeScheme removePolarVariables(const CompactTypeScheme &ty,
