@@ -179,8 +179,8 @@ std::string toString(const CompactType &ct);
 
 // Co-occurrence analysis data structures
 struct OccurrenceData {
-  SimpleTypeSet variables;  // Only variable types
-  SimpleTypeSet primitives; // Only primitive types
+  std::optional<SimpleTypeSet> variables;  // Only variable types
+  std::optional<SimpleTypeSet> primitives; // Only primitive types
 };
 using OccurrenceMap = std::map<PolarVar, OccurrenceData>;
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &ty);

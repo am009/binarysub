@@ -64,6 +64,10 @@ UTypePtr normalizeVariableNames(const UTypePtr &ty) {
               collectVars(fieldType);
             }
           } else if constexpr (std::is_same_v<T, URecursiveType>) {
+            if (seenVars.find(n.name) == seenVars.end()) {
+              seenVars.insert(n.name);
+              varOrder.push_back(n.name);
+            }
             collectVars(n.body);
           }
         },
@@ -195,7 +199,7 @@ void printTypeImpl(const UTypePtr &ty, std::ostream &os, int precedence) {
           }
           os << "}";
         } else if constexpr (std::is_same_v<T, URecursiveType>) {
-          printTypeImpl(n.body, os, 0);
+          printTypeImpl(n.body, os, 6);
           os << " as " << n.name;
         } else {
           static_assert(!sizeof(T), "Unhandled UType variant in printTypeImpl");
@@ -545,34 +549,38 @@ std::string toString(const OccurrenceMap &om) {
 
     // Format the variable set
     bool firstVar = true;
-    for (const auto &var : occData.variables) {
-      if (!firstVar) {
-        oss << ", ";
-      }
+    if (occData.variables.has_value()) {
+      for (const auto &var : *occData.variables) {
+        if (!firstVar) {
+          oss << ", ";
+        }
 
-      if (auto vs = var->getAsVariableState()) {
-        oss << var_id_to_name(vs->id);
-      } else {
-        oss << "?var"; // fallback
+        if (auto vs = var->getAsVariableState()) {
+          oss << var_id_to_name(vs->id);
+        } else {
+          oss << "?var"; // fallback
+        }
+        firstVar = false;
       }
-      firstVar = false;
     }
 
     oss << "}, prims: {";
 
     // Format the primitive set
     bool firstPrim = true;
-    for (const auto &prim : occData.primitives) {
-      if (!firstPrim) {
-        oss << ", ";
-      }
+    if (occData.primitives.has_value()) {
+      for (const auto &prim : *occData.primitives) {
+        if (!firstPrim) {
+          oss << ", ";
+        }
 
-      if (auto p = prim->getAsTPrimitive()) {
-        oss << p->name;
-      } else {
-        oss << "?prim"; // fallback
+        if (auto p = prim->getAsTPrimitive()) {
+          oss << p->name;
+        } else {
+          oss << "?prim"; // fallback
+        }
+        firstPrim = false;
       }
-      firstPrim = false;
     }
 
     oss << "}}";
@@ -868,10 +876,12 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
         if (it != coOccurrences.end()) {
           // Compute intersection with existing occurrences for variables
           SimpleTypeSet varIntersection;
-          std::set_intersection(
-              it->second.variables.begin(), it->second.variables.end(),
-              newVars.begin(), newVars.end(),
-              std::inserter(varIntersection, varIntersection.begin()));
+          if (it->second.variables.has_value()) {
+            std::set_intersection(
+                it->second.variables->begin(), it->second.variables->end(),
+                newVars.begin(), newVars.end(),
+                std::inserter(varIntersection, varIntersection.begin()));
+          }
           it->second.variables = varIntersection;
         } else {
           // First occurrence - record all co-occurring variables
@@ -898,13 +908,13 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
       if (auto vs = var->getAsVariableState()) {
         PolarVar key{var, pol};
         auto it = coOccurrences.find(key);
-        if (it != coOccurrences.end()) {
+        if (it != coOccurrences.end() && it->second.primitives.has_value()) {
           // Compute intersection with existing occurrences for primitives
           SimpleTypeSet primIntersection;
-          std::set_intersection(
-              it->second.primitives.begin(), it->second.primitives.end(),
-              newPrims.begin(), newPrims.end(),
-              std::inserter(primIntersection, primIntersection.begin()));
+            std::set_intersection(
+                it->second.primitives->begin(), it->second.primitives->end(),
+                newPrims.begin(), newPrims.end(),
+                std::inserter(primIntersection, primIntersection.begin()));
           it->second.primitives = primIntersection;
         } else {
           // First occurrence - record all co-occurring primitives
@@ -1009,28 +1019,30 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
       const auto &varOccData = varOccIt->second;
 
       // Check for variable-variable co-occurrence
-      for (const auto &coOccVar : varOccData.variables) {
-        assert(coOccVar->isVariableState());
-        if (auto tv = coOccVar->getAsVariableState()) {
-          SimpleType coOccPtr = coOccVar;
+      if (varOccData.variables.has_value()) {
+        for (const auto &coOccVar : *varOccData.variables) {
+          assert(coOccVar->isVariableState());
+          if (auto tv = coOccVar->getAsVariableState()) {
+            SimpleType coOccPtr = coOccVar;
 
-          if (coOccPtr != varPtr && varSubst.find(coOccPtr) == varSubst.end() &&
-              (recVars.count(varPtr) > 0) == (recVars.count(coOccPtr) > 0)) {
+            if (coOccPtr != varPtr && varSubst.find(coOccPtr) == varSubst.end() &&
+                (recVars.count(varPtr) > 0) == (recVars.count(coOccPtr) > 0)) {
 
-            // Check if coOccVar always co-occurs with varPtr in this polarity
-            // if (printDebug) {
-            //   std::cerr << "Check if " << var_id_to_name(varState->id)
-            //             << " always co-occurs with " <<
-            //             var_id_to_name(tv->id)
-            //             << "\n";
-            // }
-            PolarVar coOccKey{coOccPtr, pol};
-            auto coOccOccIt = coOccurrences.find(coOccKey);
+              // Check if coOccVar always co-occurs with varPtr in this polarity
+              // if (printDebug) {
+              //   std::cerr << "Check if " << var_id_to_name(varState->id)
+              //             << " always co-occurs with " <<
+              //             var_id_to_name(tv->id)
+              //             << "\n";
+              // }
+              PolarVar coOccKey{coOccPtr, pol};
+              auto coOccOccIt = coOccurrences.find(coOccKey);
 
-            if (coOccOccIt != coOccurrences.end()) {
-              // Check if coOccVar's variable occurrences include varPtr
-              bool alwaysCoOccurs = coOccOccIt->second.variables.find(varPtr) !=
-                                    coOccOccIt->second.variables.end();
+              if (coOccOccIt != coOccurrences.end() &&
+                  coOccOccIt->second.variables.has_value()) {
+                // Check if coOccVar's variable occurrences include varPtr
+                bool alwaysCoOccurs = coOccOccIt->second.variables->find(varPtr) !=
+                                      coOccOccIt->second.variables->end();
 
               if (alwaysCoOccurs) {
                 if (printDebug) {
@@ -1066,19 +1078,25 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
                       // Keep only variables that occur in both sets (plus
                       // varPtr itself)
                       SimpleTypeSet newVarOccs;
-                      for (const auto &var : oppVarIt->second.variables) {
-                        if (var == varPtr ||
-                            oppCoOccIt->second.variables.count(var) > 0) {
-                          newVarOccs.insert(var);
+                      if (oppVarIt->second.variables.has_value() &&
+                          oppCoOccIt->second.variables.has_value()) {
+                        for (const auto &var : *oppVarIt->second.variables) {
+                          if (var == varPtr ||
+                              oppCoOccIt->second.variables->count(var) > 0) {
+                            newVarOccs.insert(var);
+                          }
                         }
                       }
                       oppVarIt->second.variables = newVarOccs;
 
                       // Keep only primitives that occur in both sets
                       SimpleTypeSet newPrimOccs;
-                      for (const auto &prim : oppVarIt->second.primitives) {
-                        if (oppCoOccIt->second.primitives.count(prim) > 0) {
-                          newPrimOccs.insert(prim);
+                      if (oppVarIt->second.primitives.has_value() &&
+                          oppCoOccIt->second.primitives.has_value()) {
+                        for (const auto &prim : *oppVarIt->second.primitives) {
+                          if (oppCoOccIt->second.primitives->count(prim) > 0) {
+                            newPrimOccs.insert(prim);
+                          }
                         }
                       }
                       oppVarIt->second.primitives = newPrimOccs;
@@ -1090,30 +1108,34 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
           }
         }
       }
+      }
 
       // Check for variable-primitive co-occurrence
-      for (const auto &prim : varOccData.primitives) {
-        if (auto p = prim->getAsTPrimitive()) {
-          // Check if variable also occurs in opposite polarity with the same
-          // primitive
-          PolarVar oppKey{varPtr, !pol};
-          auto oppOccIt = coOccurrences.find(oppKey);
+      if (varOccData.primitives.has_value()) {
+        for (const auto &prim : *varOccData.primitives) {
+          if (auto p = prim->getAsTPrimitive()) {
+            // Check if variable also occurs in opposite polarity with the same
+            // primitive
+            PolarVar oppKey{varPtr, !pol};
+            auto oppOccIt = coOccurrences.find(oppKey);
 
-          if (oppOccIt != coOccurrences.end()) {
-            for (const auto &oppPrim : oppOccIt->second.primitives) {
-              if (auto oppP = oppPrim->getAsTPrimitive()) {
-                if (oppP->name == p->name) {
-                  if (printDebug) {
-                    std::cerr
-                        << "Variable "
-                        << var_id_to_name(varPtr->getAsVariableState()->id)
-                        << " always occurs with the primitive " << p->name
-                        << " in both polarities";
+            if (oppOccIt != coOccurrences.end() &&
+                oppOccIt->second.primitives.has_value()) {
+              for (const auto &oppPrim : *oppOccIt->second.primitives) {
+                if (auto oppP = oppPrim->getAsTPrimitive()) {
+                  if (oppP->name == p->name) {
+                    if (printDebug) {
+                      std::cerr
+                          << "Variable "
+                          << var_id_to_name(varPtr->getAsVariableState()->id)
+                          << " always occurs with the primitive " << p->name
+                          << " in both polarities";
+                    }
+                    // Remove the variable
+                    varSubst[varPtr] = std::nullopt;
+                    goto next_var; // Break out of all nested loops for this
+                                   // variable
                   }
-                  // Remove the variable
-                  varSubst[varPtr] = std::nullopt;
-                  goto next_var; // Break out of all nested loops for this
-                                 // variable
                 }
               }
             }
