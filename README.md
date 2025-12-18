@@ -1,11 +1,19 @@
-# Binary Subtyping Library (binsub)
+# SimpleSub C++
 
-这个库实现了一个带有级别(level)的简单子类型约束求解器，基于MLsub算法的实现。主要用于类型推断和多态类型系统。
+这个库实现了一个带有级别(level)的简单子类型约束求解器，基于SimpleSub算法的实现。主要用于类型推断和多态类型系统。
+
+基本是 https://github.com/LPTK/simple-sub/ 直接翻译过来。集成了所有测试用例，因此能够保证实现的正确性。
+
+一个小区别是，函数类型直接支持了多参数，而不是原版的单参数单返回值。
+
+入口在 binarysub/simplesub-test.cpp 里的main函数。它运行测试用例。编译使用build.sh脚本。
+
+各个代码文件的介绍在 CLAUDE.md
 
 ## 核心数据结构
 
 ### SimpleType 类型系统
-- `SimpleType`: 使用 `std::shared_ptr<TypeNode>` 表示的类型
+- `SimpleType`: 类似 `std::shared_ptr<TypeNode>` 表示的类型
 - `TypeNode`: 包含四种类型变体的联合体：
   - `TPrimitive`: 基本类型（如 int, bool）
   - `TVariable`: 类型变量，带有约束边界
@@ -68,7 +76,7 @@ SimpleType extrude(const SimpleType &ty, bool pol, int lvl,
                    std::map<PolarVS, std::shared_ptr<VariableState>> &cache,
                    VarSupply &supply);
 ```
-实现类型的"挤出"操作，用于处理不同级别之间的类型变量约束。
+用于处理多态函数引用非多态变量时的约束。
 
 ### 多态类型方案
 ```cpp
