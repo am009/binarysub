@@ -360,11 +360,11 @@ bool CompactType::operator<(const CompactType &other) const {
 }
 
 // Helper function to merge two CompactTypes based on polarity
-std::shared_ptr<CompactType>
-merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
-                    const std::shared_ptr<CompactType> &rhs) {
+CompactTypePtr
+merge_compact_types(bool pol, const CompactTypePtr &lhs,
+                    const CompactTypePtr &rhs) {
 
-  auto result = std::make_shared<CompactType>();
+  auto result = make_value_ptr<CompactType>();
 
   // Merge variables (always union)
   result->vars = lhs->vars;
@@ -377,7 +377,7 @@ merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
   // Merge record types
   if (lhs->record && rhs->record) {
     auto merged_rec =
-        std::make_shared<std::map<std::string, std::shared_ptr<CompactType>>>();
+        std::make_shared<std::map<std::string, CompactTypePtr>>();
     if (pol) {
       // Positive: intersection of common fields
       for (const auto &[k, v] : *lhs->record) {
@@ -410,7 +410,7 @@ merge_compact_types(bool pol, const std::shared_ptr<CompactType> &lhs,
   // Merge function types
   if (lhs->function && rhs->function) {
     // Merge argument vectors element-wise
-    std::vector<std::shared_ptr<CompactType>> mergedArgs;
+    std::vector<CompactTypePtr> mergedArgs;
     size_t maxArgs =
         std::max(lhs->function->first.size(), rhs->function->first.size());
     for (size_t i = 0; i < maxArgs; ++i) {
@@ -694,18 +694,18 @@ UTypePtr coalesceType(const SimpleType &st) {
 // https://github.com/LPTK/simple-sub/blob/406e292f349430938de6c612494fd518c4636a84/shared/src/main/scala/simplesub/TypeSimplifier.scala#L102
 CompactTypeScheme canonicalizeType(const SimpleType &st) {
   PolarCompactTypeMap<SimpleType> recursive;
-  std::map<SimpleType, std::shared_ptr<CompactType>, SimpleTypeValueCompare>
+  std::map<SimpleType, CompactTypePtr, SimpleTypeValueCompare>
       recVars;
 
   // Helper lambda to create CompactType with specific components
   auto make_compact =
       [](SimpleTypeSet vars = {}, SimpleTypeSet prims = {},
-         std::optional<std::map<std::string, std::shared_ptr<CompactType>>>
+         std::optional<std::map<std::string, CompactTypePtr>>
              rec = std::nullopt,
-         std::optional<std::pair<std::vector<std::shared_ptr<CompactType>>,
-                                 std::shared_ptr<CompactType>>>
+         std::optional<std::pair<std::vector<CompactTypePtr>,
+                                 CompactTypePtr>>
              fun = std::nullopt) {
-        auto ct = std::make_shared<CompactType>();
+        auto ct = make_value_ptr<CompactType>();
         ct->vars = std::move(vars);
         ct->prims = std::move(prims);
         ct->record = std::move(rec);
@@ -743,19 +743,19 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
   };
 
   // Turn outermost layer into CompactType, leaving variables untransformed
-  std::function<std::shared_ptr<CompactType>(const SimpleType &, bool)> go0 =
-      [&](const SimpleType &ty, bool pol) -> std::shared_ptr<CompactType> {
+  std::function<CompactTypePtr(const SimpleType &, bool)> go0 =
+      [&](const SimpleType &ty, bool pol) -> CompactTypePtr {
     if (ty->isTPrimitive()) {
       return make_compact({}, {ty});
     } else if (auto n = ty->getAsTFunction()) {
-      std::vector<std::shared_ptr<CompactType>> argCTs;
+      std::vector<CompactTypePtr> argCTs;
       for (const auto &arg : n->args) {
         argCTs.push_back(go0(arg, !pol));
       }
       auto resCT = go0(n->result, pol);
       return make_compact({}, {}, std::nullopt, std::make_pair(argCTs, resCT));
     } else if (auto n = ty->getAsTRecord()) {
-      std::map<std::string, std::shared_ptr<CompactType>> fields;
+      std::map<std::string, CompactTypePtr> fields;
       for (const auto &[name, fieldType] : n->fields) {
         fields[name] = go0(fieldType, pol);
       }
@@ -769,11 +769,11 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
   };
 
   // Merge bounds and traverse the result
-  std::function<std::shared_ptr<CompactType>(std::shared_ptr<CompactType>, bool,
+  std::function<CompactTypePtr(CompactTypePtr, bool,
                                              PolarCompactTypeSet &)>
       go1 =
-          [&](std::shared_ptr<CompactType> ty, bool pol,
-              PolarCompactTypeSet &inProcess) -> std::shared_ptr<CompactType> {
+          [&](CompactTypePtr ty, bool pol,
+              PolarCompactTypeSet &inProcess) -> CompactTypePtr {
     if (ty->vars.empty() && ty->prims.empty() && !ty->record && !ty->function) {
       return ty; // Empty type
     }
@@ -791,7 +791,7 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       }
     } else {
       // Collect bounds from all variables
-      auto bound = std::make_shared<CompactType>();
+      auto bound = make_value_ptr<CompactType>();
       for (const auto &var : ty->vars) {
         if (auto vs = var->getAsVariableState()) {
           const auto &bounds = pol ? vs->lowerBounds : vs->upperBounds;
@@ -811,12 +811,12 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       newInProcess.insert(pty);
 
       // Recursively process nested types
-      auto adapted = std::make_shared<CompactType>();
+      auto adapted = make_value_ptr<CompactType>();
       adapted->vars = res->vars;
       adapted->prims = res->prims;
 
       if (res->record) {
-        std::map<std::string, std::shared_ptr<CompactType>> adaptedRec;
+        std::map<std::string, CompactTypePtr> adaptedRec;
         for (const auto &[k, v] : *res->record) {
           adaptedRec[k] = go1(v, pol, newInProcess);
         }
@@ -824,7 +824,7 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
       }
 
       if (res->function) {
-        std::vector<std::shared_ptr<CompactType>> adaptedArgs;
+        std::vector<CompactTypePtr> adaptedArgs;
         for (const auto &arg : res->function->first) {
           adaptedArgs.push_back(go1(arg, !pol, newInProcess));
         }
@@ -854,11 +854,11 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
 // Co-occurrence analysis implementation
 OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
   std::map<PolarVar, OccurrenceData> coOccurrences;
-  std::map<SimpleType, std::shared_ptr<CompactType>> processedRecVars;
+  std::map<SimpleType, CompactTypePtr> processedRecVars;
 
   // Traverses the type, performing the analysis
-  std::function<void(std::shared_ptr<CompactType>, bool)> go =
-      [&](std::shared_ptr<CompactType> ty, bool pol) -> void {
+  std::function<void(CompactTypePtr, bool)> go =
+      [&](CompactTypePtr ty, bool pol) -> void {
     // std::cerr << "Visiting: " << toString(*ty) << "\n";
     // Collect variables and primitives separately
     SimpleTypeSet newVars;
@@ -954,8 +954,8 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   std::map<SimpleType, std::optional<SimpleType>> varSubst;
 
   // Collect all variables from the type scheme
-  std::function<void(std::shared_ptr<CompactType>)> collectVars =
-      [&](std::shared_ptr<CompactType> ty) -> void {
+  std::function<void(CompactTypePtr)> collectVars =
+      [&](CompactTypePtr ty) -> void {
     for (const auto &var : ty->vars) {
       assert(var->isVariableState());
       if (auto tv = var->getAsVariableState()) {
@@ -1147,10 +1147,10 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   }
 
   // Step 3: Reconstruct the type with substitutions applied
-  std::function<std::shared_ptr<CompactType>(std::shared_ptr<CompactType>)>
+  std::function<CompactTypePtr(CompactTypePtr)>
       reconstruct =
-          [&](std::shared_ptr<CompactType> ty) -> std::shared_ptr<CompactType> {
-    auto result = std::make_shared<CompactType>();
+          [&](CompactTypePtr ty) -> CompactTypePtr {
+    auto result = make_value_ptr<CompactType>();
 
     // Apply substitutions to variables
     for (const auto &var : ty->vars) {
@@ -1174,7 +1174,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
 
     // Recursively reconstruct record fields
     if (ty->record) {
-      std::map<std::string, std::shared_ptr<CompactType>> newRecord;
+      std::map<std::string, CompactTypePtr> newRecord;
       for (const auto &[fieldName, fieldType] : *ty->record) {
         newRecord[fieldName] = reconstruct(fieldType);
       }
@@ -1183,7 +1183,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
 
     // Recursively reconstruct function types
     if (ty->function) {
-      std::vector<std::shared_ptr<CompactType>> reconstructedArgs;
+      std::vector<CompactTypePtr> reconstructedArgs;
       for (const auto &arg : ty->function->first) {
         reconstructedArgs.push_back(reconstruct(arg));
       }
@@ -1198,7 +1198,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   auto newTerm = reconstruct(cty.cty);
 
   // Reconstruct recursive variable bounds with substitutions applied
-  std::map<SimpleType, std::shared_ptr<CompactType>, SimpleTypeValueCompare>
+  std::map<SimpleType, CompactTypePtr, SimpleTypeValueCompare>
       newRecVars;
   for (const auto &[varPtr, bound] : recVars) {
     auto substIt = varSubst.find(varPtr);
@@ -1228,16 +1228,16 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty, bool printDebug) {
     return nullptr;
   };
   // Create a compact type with only a variable.
-  auto fromOnlyVariable = [](SimpleType t) -> std::shared_ptr<CompactType> {
+  auto fromOnlyVariable = [](SimpleType t) -> CompactTypePtr {
     assert(t->isVariableState());
     auto c = make_empty_compact_type();
     c->vars.insert(t);
     return c;
   };
 
-  std::function<UTypePtr(std::shared_ptr<CompactType>, bool,
+  std::function<UTypePtr(CompactTypePtr, bool,
                          PolarCompactTypeMap<std::function<UTypePtr()>> &)>
-      go = [&](std::shared_ptr<CompactType> ty, bool pol,
+      go = [&](CompactTypePtr ty, bool pol,
                PolarCompactTypeMap<std::function<UTypePtr()>> &inProcess)
       -> UTypePtr {
     auto key = std::make_pair(ty, pol);
@@ -1279,6 +1279,7 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty, bool printDebug) {
       auto recIt = cty.recVars.find(var);
       if (recIt != cty.recVars.end()) {
         // Recursive variable - process its bound
+        std::cout << "here2\n";
         auto boundType = go(recIt->second, pol, newInProcess);
         result = boundType;
       } else {
