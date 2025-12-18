@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -29,7 +30,7 @@ struct Scope {
 
 // ======================= SimpleType =============
 struct TypeNode;
-using SimpleType = std::shared_ptr<TypeNode>;
+using SimpleType = value_ptr<TypeNode>;
 
 // Convert a variable ID to a letter-based name
 inline std::string var_id_to_name(std::uint32_t id) {
@@ -56,6 +57,10 @@ struct VariableState {
       return id < other.id;
     return level < other.level;
   }
+  bool operator==(const VariableState &other) const {
+    return !(*this < other) && !(other < *this);
+  }
+  bool operator!=(const VariableState &other) const { return !(*this == other); }
   std::string name() const {
     return var_id_to_name(id);
   }
@@ -65,6 +70,10 @@ struct TPrimitive {
   std::string name;
 
   bool operator<(const TPrimitive &other) const { return name < other.name; }
+  bool operator==(const TPrimitive &other) const {
+    return !(*this < other) && !(other < *this);
+  }
+  bool operator!=(const TPrimitive &other) const { return !(*this == other); }
 };
 
 struct TFunction {
@@ -72,12 +81,20 @@ struct TFunction {
   SimpleType result;
 
   bool operator<(const TFunction &other) const;
+  bool operator==(const TFunction &other) const {
+    return !(*this < other) && !(other < *this);
+  }
+  bool operator!=(const TFunction &other) const { return !(*this == other); }
 };
 
 struct TRecord {
   std::vector<std::pair<std::string, SimpleType>> fields;
 
   bool operator<(const TRecord &other) const;
+  bool operator==(const TRecord &other) const {
+    return !(*this < other) && !(other < *this);
+  }
+  bool operator!=(const TRecord &other) const { return !(*this == other); }
 };
 
 struct TypeNode {
@@ -115,17 +132,21 @@ struct TypeNode {
   bool isTRecord() const { return std::holds_alternative<TRecord>(v); }
 
   bool operator<(const TypeNode &other) const;
+  bool operator==(const TypeNode &other) const {
+    return !(*this < other) && !(other < *this);
+  }
+  bool operator!=(const TypeNode &other) const { return !(*this == other); }
 };
 
 // Type creation functions
 
 // Type creation functions
 inline SimpleType make_primitive(std::string name) {
-  return std::make_shared<TypeNode>(TPrimitive{std::move(name)});
+  return make_value_ptr<TypeNode>(TPrimitive{std::move(name)});
 }
 
 inline SimpleType make_variable(int lvl) {
-  return std::make_shared<TypeNode>(VariableState(globalVarSupply.fresh_id(), lvl));
+  return make_value_ptr<TypeNode>(VariableState(globalVarSupply.fresh_id(), lvl));
 }
 
 inline SimpleType fresh_variable(int lvl) {
@@ -134,7 +155,7 @@ inline SimpleType fresh_variable(int lvl) {
 
 inline SimpleType make_function(std::vector<SimpleType> args,
                                 SimpleType result) {
-  return std::make_shared<TypeNode>(
+  return make_value_ptr<TypeNode>(
       TFunction{std::move(args), std::move(result)});
 }
 
@@ -148,7 +169,7 @@ inline SimpleType
 make_record(std::vector<std::pair<std::string, SimpleType>> fields) {
   std::sort(fields.begin(), fields.end(),
             [](auto &x, auto &y) { return x.first < y.first; });
-  return std::make_shared<TypeNode>(TRecord{std::move(fields)});
+  return make_value_ptr<TypeNode>(TRecord{std::move(fields)});
 }
 
 // Utility functions
@@ -177,11 +198,7 @@ struct PolarVar {
   SimpleType var;
   bool pos;
   bool operator<(const PolarVar &other) const {
-    auto var_ptr = extractVariableState(var);
-    auto other_var_ptr = extractVariableState(other.var);
-    if (var_ptr != other_var_ptr)
-      return var_ptr < other_var_ptr;
-    return pos < other.pos;
+    return std::tie(var, pos) < std::tie(other.var, other.pos);
   }
 };
 

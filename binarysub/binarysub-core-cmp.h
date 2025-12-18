@@ -81,15 +81,7 @@ inline bool TypeNode::operator<(const TypeNode &other) const {
 }
 
 inline bool compareSimpleType(const SimpleType &lhs, const SimpleType &rhs) {
-  // Handle null pointers
-  if (!lhs && !rhs)
-    return false;
-  if (!lhs)
-    return true;
-  if (!rhs)
-    return false;
-
-  return *lhs < *rhs;
+  return lhs < rhs;
 }
 
 // Custom comparator for SimpleType that compares by value instead of pointer

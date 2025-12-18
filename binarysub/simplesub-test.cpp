@@ -149,10 +149,6 @@ void doTestProgram(const char *str, const std::vector<const char *> &expected) {
     std::cout << "Simplifying type for definition " << i << ": "
               << std::get<2>(pgrm.defs[i])->str() << "...\n";
 
-    // if (i == 6) {
-    //   std::cout << "here\n";
-    //   printDebug = true;
-    // }
     // Simplify the type
     auto final = simplifyType(ty, printDebug);
 
