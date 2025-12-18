@@ -53,17 +53,15 @@ struct VariableState {
   VariableState(std::uint32_t i, int lvl) : id(i), level(lvl) {};
 
   bool operator<(const VariableState &other) const {
-    if (id != other.id)
-      return id < other.id;
-    return level < other.level;
+    return std::tie(id, level) < std::tie(other.id, other.level);
   }
   bool operator==(const VariableState &other) const {
     return !(*this < other) && !(other < *this);
   }
-  bool operator!=(const VariableState &other) const { return !(*this == other); }
-  std::string name() const {
-    return var_id_to_name(id);
+  bool operator!=(const VariableState &other) const {
+    return !(*this == other);
   }
+  std::string name() const { return var_id_to_name(id); }
 };
 
 struct TPrimitive {
@@ -80,7 +78,23 @@ struct TFunction {
   std::vector<SimpleType> args;
   SimpleType result;
 
-  bool operator<(const TFunction &other) const;
+  bool operator<(const TFunction &other) const {
+    // Compare argument count first
+    if (args.size() != other.args.size()) {
+      return args.size() < other.args.size();
+    }
+    // Compare arguments
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (args[i] < other.args[i]) {
+        return true;
+      }
+      if (other.args[i] < args[i]) {
+        return false;
+      }
+    }
+    // Compare result
+    return result < other.result;
+  }
   bool operator==(const TFunction &other) const {
     return !(*this < other) && !(other < *this);
   }
@@ -90,7 +104,27 @@ struct TFunction {
 struct TRecord {
   std::vector<std::pair<std::string, SimpleType>> fields;
 
-  bool operator<(const TRecord &other) const;
+  bool operator<(const TRecord &other) const {
+    // Compare field count first
+    if (fields.size() != other.fields.size()) {
+      return fields.size() < other.fields.size();
+    }
+    // Compare fields
+    for (size_t i = 0; i < fields.size(); ++i) {
+      const auto &lhs_field = fields[i];
+      const auto &rhs_field = other.fields[i];
+      if (lhs_field.first != rhs_field.first) {
+        return lhs_field.first < rhs_field.first;
+      }
+      if (lhs_field.second < rhs_field.second) {
+        return true;
+      }
+      if (rhs_field.second < lhs_field.second) {
+        return false;
+      }
+    }
+    return false;
+  }
   bool operator==(const TRecord &other) const {
     return !(*this < other) && !(other < *this);
   }
@@ -131,12 +165,14 @@ struct TypeNode {
   bool isTFunction() const { return std::holds_alternative<TFunction>(v); }
   bool isTRecord() const { return std::holds_alternative<TRecord>(v); }
 
-  bool operator<(const TypeNode &other) const;
+  bool operator<(const TypeNode &other) const { return v < other.v; }
   bool operator==(const TypeNode &other) const {
     return !(*this < other) && !(other < *this);
   }
   bool operator!=(const TypeNode &other) const { return !(*this == other); }
 };
+
+using SimpleTypeSet = std::set<SimpleType>;
 
 // Type creation functions
 
@@ -146,12 +182,11 @@ inline SimpleType make_primitive(std::string name) {
 }
 
 inline SimpleType make_variable(int lvl) {
-  return make_value_ptr<TypeNode>(VariableState(globalVarSupply.fresh_id(), lvl));
+  return make_value_ptr<TypeNode>(
+      VariableState(globalVarSupply.fresh_id(), lvl));
 }
 
-inline SimpleType fresh_variable(int lvl) {
-  return make_variable(lvl);
-}
+inline SimpleType fresh_variable(int lvl) { return make_variable(lvl); }
 
 inline SimpleType make_function(std::vector<SimpleType> args,
                                 SimpleType result) {

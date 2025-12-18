@@ -254,8 +254,7 @@ TypeScheme generalize(const SimpleType &rhs, int env_level) {
   return PolyScheme{env_level, rhs};
 }
 
-// =================== Type Simplification Implementation
-// ===========================
+// ========== Type Simplification Implementation ======================
 
 // Helper function to get variable ID from type variable names (assumes format
 // "α123")
@@ -271,98 +270,9 @@ std::uint32_t extractVariableId(const std::string &varName) {
 
 // ======================= CompactType Implementation =======================
 
-bool CompactType::operator<(const CompactType &other) const {
-  // Compare vars first
-  if (vars < other.vars) {
-    return true;
-  }
-  if (other.vars < vars) {
-    return false;
-  }
-
-  // Compare prims
-  if (prims < other.prims) {
-    return true;
-  }
-  if (other.prims < prims) {
-    return false;
-  }
-
-  // Compare record
-  if (!record && other.record)
-    return true;
-  if (record && !other.record)
-    return false;
-
-  if (record && other.record) {
-    auto it1 = record->begin();
-    auto it2 = other.record->begin();
-    auto end1 = record->end();
-    auto end2 = other.record->end();
-
-    while (it1 != end1 && it2 != end2) {
-      // Compare keys
-      if (it1->first < it2->first)
-        return true;
-      if (it2->first < it1->first)
-        return false;
-
-      // Keys equal, compare values (dereference shared_ptrs)
-      if (*it1->second < *it2->second)
-        return true;
-      if (*it2->second < *it1->second)
-        return false;
-
-      ++it1;
-      ++it2;
-    }
-
-    // If one map is a prefix of the other
-    if (it1 == end1 && it2 != end2)
-      return true;
-    if (it1 != end1 && it2 == end2)
-      return false;
-  }
-
-  // Compare function
-  if (!function && other.function)
-    return true;
-  if (function && !other.function)
-    return false;
-
-  if (function && other.function) {
-    const auto &args1 = function->first;
-    const auto &args2 = other.function->first;
-
-    // Compare argument counts
-    if (args1.size() < args2.size())
-      return true;
-    if (args1.size() > args2.size())
-      return false;
-
-    // Compare arguments element by element
-    for (size_t i = 0; i < args1.size(); ++i) {
-      if (*args1[i] < *args2[i])
-        return true;
-      if (*args2[i] < *args1[i])
-        return false;
-    }
-
-    // Compare result types
-    if (*function->second < *other.function->second)
-      return true;
-    if (*other.function->second < *function->second)
-      return false;
-  }
-
-  // All fields are equal
-  return false;
-}
-
 // Helper function to merge two CompactTypes based on polarity
-CompactTypePtr
-merge_compact_types(bool pol, const CompactTypePtr &lhs,
-                    const CompactTypePtr &rhs) {
+CompactTypePtr merge_compact_types(bool pol, const CompactTypePtr &lhs,
+                                   const CompactTypePtr &rhs) {
 
   auto result = make_value_ptr<CompactType>();
 
@@ -376,8 +286,7 @@ merge_compact_types(bool pol, const CompactTypePtr &lhs,
 
   // Merge record types
   if (lhs->record && rhs->record) {
-    auto merged_rec =
-        std::make_shared<std::map<std::string, CompactTypePtr>>();
+    auto merged_rec = std::make_shared<std::map<std::string, CompactTypePtr>>();
     if (pol) {
       // Positive: intersection of common fields
       for (const auto &[k, v] : *lhs->record) {
@@ -694,16 +603,14 @@ UTypePtr coalesceType(const SimpleType &st) {
 // https://github.com/LPTK/simple-sub/blob/406e292f349430938de6c612494fd518c4636a84/shared/src/main/scala/simplesub/TypeSimplifier.scala#L102
 CompactTypeScheme canonicalizeType(const SimpleType &st) {
   PolarCompactTypeMap<SimpleType> recursive;
-  std::map<SimpleType, CompactTypePtr, SimpleTypeValueCompare>
-      recVars;
+  std::map<SimpleType, CompactTypePtr> recVars;
 
   // Helper lambda to create CompactType with specific components
   auto make_compact =
       [](SimpleTypeSet vars = {}, SimpleTypeSet prims = {},
-         std::optional<std::map<std::string, CompactTypePtr>>
-             rec = std::nullopt,
-         std::optional<std::pair<std::vector<CompactTypePtr>,
-                                 CompactTypePtr>>
+         std::optional<std::map<std::string, CompactTypePtr>> rec =
+             std::nullopt,
+         std::optional<std::pair<std::vector<CompactTypePtr>, CompactTypePtr>>
              fun = std::nullopt) {
         auto ct = make_value_ptr<CompactType>();
         ct->vars = std::move(vars);
@@ -769,11 +676,9 @@ CompactTypeScheme canonicalizeType(const SimpleType &st) {
   };
 
   // Merge bounds and traverse the result
-  std::function<CompactTypePtr(CompactTypePtr, bool,
-                                             PolarCompactTypeSet &)>
-      go1 =
-          [&](CompactTypePtr ty, bool pol,
-              PolarCompactTypeSet &inProcess) -> CompactTypePtr {
+  std::function<CompactTypePtr(CompactTypePtr, bool, PolarCompactTypeSet &)>
+      go1 = [&](CompactTypePtr ty, bool pol,
+                PolarCompactTypeSet &inProcess) -> CompactTypePtr {
     if (ty->vars.empty() && ty->prims.empty() && !ty->record && !ty->function) {
       return ty; // Empty type
     }
@@ -857,8 +762,8 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
   std::map<SimpleType, CompactTypePtr> processedRecVars;
 
   // Traverses the type, performing the analysis
-  std::function<void(CompactTypePtr, bool)> go =
-      [&](CompactTypePtr ty, bool pol) -> void {
+  std::function<void(CompactTypePtr, bool)> go = [&](CompactTypePtr ty,
+                                                     bool pol) -> void {
     // std::cerr << "Visiting: " << toString(*ty) << "\n";
     // Collect variables and primitives separately
     SimpleTypeSet newVars;
@@ -911,10 +816,10 @@ OccurrenceMap analyzeOccurrences(const CompactTypeScheme &cty) {
         if (it != coOccurrences.end() && it->second.primitives.has_value()) {
           // Compute intersection with existing occurrences for primitives
           SimpleTypeSet primIntersection;
-            std::set_intersection(
-                it->second.primitives->begin(), it->second.primitives->end(),
-                newPrims.begin(), newPrims.end(),
-                std::inserter(primIntersection, primIntersection.begin()));
+          std::set_intersection(
+              it->second.primitives->begin(), it->second.primitives->end(),
+              newPrims.begin(), newPrims.end(),
+              std::inserter(primIntersection, primIntersection.begin()));
           it->second.primitives = primIntersection;
         } else {
           // First occurrence - record all co-occurring primitives
@@ -1025,7 +930,8 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
           if (auto tv = coOccVar->getAsVariableState()) {
             SimpleType coOccPtr = coOccVar;
 
-            if (coOccPtr != varPtr && varSubst.find(coOccPtr) == varSubst.end() &&
+            if (coOccPtr != varPtr &&
+                varSubst.find(coOccPtr) == varSubst.end() &&
                 (recVars.count(varPtr) > 0) == (recVars.count(coOccPtr) > 0)) {
 
               // Check if coOccVar always co-occurs with varPtr in this polarity
@@ -1041,65 +947,69 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
               if (coOccOccIt != coOccurrences.end() &&
                   coOccOccIt->second.variables.has_value()) {
                 // Check if coOccVar's variable occurrences include varPtr
-                bool alwaysCoOccurs = coOccOccIt->second.variables->find(varPtr) !=
-                                      coOccOccIt->second.variables->end();
+                bool alwaysCoOccurs =
+                    coOccOccIt->second.variables->find(varPtr) !=
+                    coOccOccIt->second.variables->end();
 
-              if (alwaysCoOccurs) {
-                if (printDebug) {
-                  std::cerr << "In polarity " << pol << ", "
-                            << var_id_to_name(varState->id)
-                            << " always co-occurs with "
-                            << var_id_to_name(tv->id) << "\n";
-                }
-                // Unify coOccPtr into varPtr
-                varSubst[coOccPtr] = varPtr;
+                if (alwaysCoOccurs) {
+                  if (printDebug) {
+                    std::cerr << "In polarity " << pol << ", "
+                              << var_id_to_name(varState->id)
+                              << " always co-occurs with "
+                              << var_id_to_name(tv->id) << "\n";
+                  }
+                  // Unify coOccPtr into varPtr
+                  varSubst[coOccPtr] = varPtr;
 
-                // If both are recursive, merge their bounds
-                if (recVars.count(varPtr) && recVars.count(coOccPtr)) {
-                  auto mergedBound = merge_compact_types(pol, recVars[varPtr],
-                                                         recVars[coOccPtr]);
-                  recVars[varPtr] = mergedBound;
-                  recVars.erase(coOccPtr);
-                } else {
-                  // If non recursive, fix coOccurrences map.
-                  // When unifying coOccPtr into varPtr, we need to update the
-                  // opposite polarity co-occurrences
-                  PolarVar oppCoOccKey{coOccPtr, !pol};
-                  auto oppCoOccIt = coOccurrences.find(oppCoOccKey);
+                  // If both are recursive, merge their bounds
+                  if (recVars.count(varPtr) && recVars.count(coOccPtr)) {
+                    auto mergedBound = merge_compact_types(pol, recVars[varPtr],
+                                                           recVars[coOccPtr]);
+                    recVars[varPtr] = mergedBound;
+                    recVars.erase(coOccPtr);
+                  } else {
+                    // If non recursive, fix coOccurrences map.
+                    // When unifying coOccPtr into varPtr, we need to update the
+                    // opposite polarity co-occurrences
+                    PolarVar oppCoOccKey{coOccPtr, !pol};
+                    auto oppCoOccIt = coOccurrences.find(oppCoOccKey);
 
-                  if (oppCoOccIt != coOccurrences.end()) {
-                    // Update varPtr's opposite polarity co-occurrences to be
-                    // the intersection with coOccPtr's opposite polarity
-                    // co-occurrences
-                    PolarVar oppVarKey{varPtr, !pol};
-                    auto oppVarIt = coOccurrences.find(oppVarKey);
+                    if (oppCoOccIt != coOccurrences.end()) {
+                      // Update varPtr's opposite polarity co-occurrences to be
+                      // the intersection with coOccPtr's opposite polarity
+                      // co-occurrences
+                      PolarVar oppVarKey{varPtr, !pol};
+                      auto oppVarIt = coOccurrences.find(oppVarKey);
 
-                    if (oppVarIt != coOccurrences.end()) {
-                      // Keep only variables that occur in both sets (plus
-                      // varPtr itself)
-                      SimpleTypeSet newVarOccs;
-                      if (oppVarIt->second.variables.has_value() &&
-                          oppCoOccIt->second.variables.has_value()) {
-                        for (const auto &var : *oppVarIt->second.variables) {
-                          if (var == varPtr ||
-                              oppCoOccIt->second.variables->count(var) > 0) {
-                            newVarOccs.insert(var);
+                      if (oppVarIt != coOccurrences.end()) {
+                        // Keep only variables that occur in both sets (plus
+                        // varPtr itself)
+                        SimpleTypeSet newVarOccs;
+                        if (oppVarIt->second.variables.has_value() &&
+                            oppCoOccIt->second.variables.has_value()) {
+                          for (const auto &var : *oppVarIt->second.variables) {
+                            if (var == varPtr ||
+                                oppCoOccIt->second.variables->count(var) > 0) {
+                              newVarOccs.insert(var);
+                            }
                           }
                         }
-                      }
-                      oppVarIt->second.variables = newVarOccs;
+                        oppVarIt->second.variables = newVarOccs;
 
-                      // Keep only primitives that occur in both sets
-                      SimpleTypeSet newPrimOccs;
-                      if (oppVarIt->second.primitives.has_value() &&
-                          oppCoOccIt->second.primitives.has_value()) {
-                        for (const auto &prim : *oppVarIt->second.primitives) {
-                          if (oppCoOccIt->second.primitives->count(prim) > 0) {
-                            newPrimOccs.insert(prim);
+                        // Keep only primitives that occur in both sets
+                        SimpleTypeSet newPrimOccs;
+                        if (oppVarIt->second.primitives.has_value() &&
+                            oppCoOccIt->second.primitives.has_value()) {
+                          for (const auto &prim :
+                               *oppVarIt->second.primitives) {
+                            if (oppCoOccIt->second.primitives->count(prim) >
+                                0) {
+                              newPrimOccs.insert(prim);
+                            }
                           }
                         }
+                        oppVarIt->second.primitives = newPrimOccs;
                       }
-                      oppVarIt->second.primitives = newPrimOccs;
                     }
                   }
                 }
@@ -1107,7 +1017,6 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
             }
           }
         }
-      }
       }
 
       // Check for variable-primitive co-occurrence
@@ -1147,9 +1056,8 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   }
 
   // Step 3: Reconstruct the type with substitutions applied
-  std::function<CompactTypePtr(CompactTypePtr)>
-      reconstruct =
-          [&](CompactTypePtr ty) -> CompactTypePtr {
+  std::function<CompactTypePtr(CompactTypePtr)> reconstruct =
+      [&](CompactTypePtr ty) -> CompactTypePtr {
     auto result = make_value_ptr<CompactType>();
 
     // Apply substitutions to variables
@@ -1198,8 +1106,7 @@ CompactTypeScheme simplifyType(const CompactTypeScheme &cty, bool printDebug) {
   auto newTerm = reconstruct(cty.cty);
 
   // Reconstruct recursive variable bounds with substitutions applied
-  std::map<SimpleType, CompactTypePtr, SimpleTypeValueCompare>
-      newRecVars;
+  std::map<SimpleType, CompactTypePtr> newRecVars;
   for (const auto &[varPtr, bound] : recVars) {
     auto substIt = varSubst.find(varPtr);
     if (substIt == varSubst.end() || substIt->second.has_value()) {
@@ -1279,7 +1186,6 @@ UTypePtr coalesceCompactType(const CompactTypeScheme &cty, bool printDebug) {
       auto recIt = cty.recVars.find(var);
       if (recIt != cty.recVars.end()) {
         // Recursive variable - process its bound
-        std::cout << "here2\n";
         auto boundType = go(recIt->second, pol, newInProcess);
         result = boundType;
       } else {

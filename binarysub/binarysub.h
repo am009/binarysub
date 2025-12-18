@@ -1,7 +1,6 @@
 #ifndef BINARYSUB_H
 #define BINARYSUB_H
 
-#include "binarysub-core-cmp.h"
 #include "binarysub-core.h"
 #include "binarysub-utils.h"
 
@@ -11,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 
 namespace binarysub {
@@ -120,7 +120,9 @@ struct CompactType {
                           CompactTypePtr>>
       function; // function type
 
-  bool operator<(const CompactType &other) const;
+  bool operator<(const CompactType &other) const {
+    return std::tie(vars, prims, record, function) < std::tie(other.vars, other.prims, other.record, other.function);
+  }
   bool operator==(const CompactType &other) const {
     return !(*this < other) && !(other < *this);
   }
@@ -138,7 +140,7 @@ using PolarCompactTypeMap =
 
 struct CompactTypeScheme {
   CompactTypePtr cty;
-  std::map<SimpleType, CompactTypePtr, SimpleTypeValueCompare>
+  std::map<SimpleType, CompactTypePtr>
       recVars; // recursive variable bounds
 };
 

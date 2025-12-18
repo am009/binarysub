@@ -10,7 +10,7 @@
 - binarysub/binarysub-utils.h 包含了相关的工具类的定义，包括
   - expected，类似std::expected，
   - Error结构体，包含一个简单的string成员
-- binarysub/binarysub-core.cpp  binarysub-core.h 核心类型推理部分 binarysub-core-cmp.h 实现了SimpleType的比较运算
+- binarysub/binarysub-core.cpp  binarysub-core.h 核心类型推理部分
 - binarysub/binarysub.cpp binarysub.h 类型简化等代码
 - binarysub/simplesub-test.cpp 运行测试用例，主函数
 
